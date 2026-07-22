@@ -1,0 +1,14 @@
+# OS cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*~
+
+# Node (only if build/test tooling is ever added — the app itself needs none)
+node_modules/
+npm-debug.log*

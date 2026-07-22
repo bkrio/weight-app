@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Weight Tracker</title>
+  <meta name="description" content="Private, offline-first daily weight tracking.">
+  <meta name="theme-color" content="#f9f9f7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0d0d0d" media="(prefers-color-scheme: dark)">
+  <link rel="manifest" href="./manifest.json">
+  <link rel="icon" type="image/png" href="./icons/icon-192.png">
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Weight">
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./vendor/chart.umd.js" defer></script>
+  <script src="./vendor/chartjs-adapter-date-fns.bundle.min.js" defer></script>
+  <script type="module" src="./js/app.js"></script>
+</head>
+<body>
+  <main class="wrap">
+    <header class="app-header">
+      <h1>Weight</h1>
+    </header>
+
+    <!-- Morning fast path: open → type → Save -->
+    <section class="card" aria-labelledby="entry-title">
+      <div class="card-row">
+        <h2 id="entry-title" class="card-title">Today</h2>
+        <button id="entry-cancel" type="button" class="text-btn" hidden>Cancel</button>
+      </div>
+      <form id="entry-form" novalidate>
+        <div class="weight-row">
+          <label class="visually-hidden" for="weight-input">Weight</label>
+          <input id="weight-input" type="text" inputmode="decimal" autocomplete="off"
+                 placeholder="0.0" enterkeyhint="done" autofocus>
+          <span id="weight-unit-suffix" class="unit-suffix">lbs</span>
+          <button type="submit" class="primary-btn">Save</button>
+        </div>
+        <label class="visually-hidden" for="note-input">Note (optional)</label>
+        <input id="note-input" type="text" class="note-input" maxlength="200" autocomplete="off"
+               placeholder="Note (optional) — e.g. traveled, high sodium">
+        <div class="entry-extra">
+          <p id="entry-hint" class="hint" aria-live="polite"></p>
+          <button id="other-day-toggle" type="button" class="text-btn subtle">Log a different day</button>
+          <label class="visually-hidden" for="entry-date-input">Date to log</label>
+          <input id="entry-date-input" type="date" min="1900-01-01" hidden>
+        </div>
+      </form>
+    </section>
+
+    <section class="card" aria-label="Stats">
+      <p id="trend-line" class="stat-sentence muted">Loading…</p>
+      <p id="projection-line" class="stat-sentence muted"></p>
+      <div class="tiles">
+        <div class="tile" id="tile-7d">
+          <span class="tile-label">7-day change</span>
+          <span class="tile-value">—</span>
+          <span class="tile-sub"></span>
+        </div>
+        <div class="tile" id="tile-30d">
+          <span class="tile-label">30-day change</span>
+          <span class="tile-value">—</span>
+          <span class="tile-sub"></span>
+        </div>
+        <div class="tile" id="tile-start">
+          <span class="tile-label">Since start</span>
+          <span class="tile-value">—</span>
+          <span class="tile-sub"></span>
+        </div>
+        <div class="tile" id="tile-goal">
+          <span class="tile-label">To goal</span>
+          <span class="tile-value">—</span>
+          <span class="tile-sub"></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="chart-title">
+      <h2 id="chart-title" class="card-title">Weight (lbs)</h2>
+      <div id="chart-wrap" class="chart-wrap" hidden>
+        <canvas id="chart-canvas" role="img"
+                aria-label="Line chart of weight over time. All values are listed in the History section below."></canvas>
+      </div>
+      <p id="chart-empty" class="empty">Log your first weight to see the graph.</p>
+    </section>
+
+    <section class="card" aria-labelledby="goal-title">
+      <div class="card-row">
+        <h2 id="goal-title" class="card-title">Goal</h2>
+        <div class="card-row-actions">
+          <button id="goal-edit" type="button" class="text-btn">Set goal</button>
+          <button id="goal-clear" type="button" class="text-btn danger" hidden>Clear</button>
+        </div>
+      </div>
+      <p id="goal-summary" class="hint">No goal set.</p>
+      <form id="goal-form" novalidate hidden>
+        <div class="weight-row">
+          <label class="visually-hidden" for="goal-weight-input">Target weight</label>
+          <input id="goal-weight-input" type="text" inputmode="decimal" autocomplete="off" placeholder="0.0">
+          <span id="goal-unit-suffix" class="unit-suffix">lbs</span>
+        </div>
+        <label class="field-label" for="goal-date-input">Target date (optional)</label>
+        <input id="goal-date-input" type="date">
+        <div class="form-actions">
+          <button type="submit" class="primary-btn">Save goal</button>
+          <button id="goal-cancel" type="button" class="text-btn">Cancel</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="card" aria-labelledby="history-title">
+      <h2 id="history-title" class="card-title" tabindex="-1">History</h2>
+      <ul id="history-list" class="history-list"></ul>
+      <p id="history-empty" class="empty">No entries yet.</p>
+    </section>
+
+    <section class="card" aria-labelledby="settings-title">
+      <h2 id="settings-title" class="card-title">Settings</h2>
+      <div class="settings-row">
+        <span class="field-label" id="unit-label">Units</span>
+        <div class="segmented" role="radiogroup" aria-labelledby="unit-label">
+          <label class="segment"><input type="radio" name="unit" value="lbs"><span>lbs</span></label>
+          <label class="segment"><input type="radio" name="unit" value="kg"><span>kg</span></label>
+        </div>
+      </div>
+      <div class="settings-row">
+        <span class="field-label">Data</span>
+        <button id="export-btn" type="button" class="secondary-btn">Export CSV</button>
+      </div>
+      <p class="hint">All data stays on this device (browser storage). Export a CSV backup now and then.</p>
+    </section>
+
+    <footer class="app-footer">
+      <p class="hint">Works offline · Add to Home Screen to use it like an app</p>
+    </footer>
+  </main>
+
+  <div id="toast" class="toast" role="status"></div>
+</body>
+</html>
