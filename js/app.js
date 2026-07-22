@@ -601,11 +601,32 @@ for (const radio of els.unitRadios()) {
 els.exportBtn.addEventListener('click', async () => {
   const res = await withStore(() => store.exportCSV(), 'Could not export CSV.');
   if (!res.ok) return;
-  const blob = new Blob([res.value], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
+  const filename = `weight-history-${todayISO()}.csv`;
+  const file = new File([res.value], filename, { type: 'text/csv' });
+
+  // On iOS the `<a download>` blob trick doesn't reliably save a file — it
+  // opens the CSV as text instead (worse in standalone) — so on touch devices
+  // that can share files, hand it to the native share sheet (Save to Files, or
+  // send it on). Desktop/Android keep the plain download.
+  const canShareFile =
+    window.matchMedia('(pointer: coarse)').matches &&
+    typeof navigator.canShare === 'function' &&
+    navigator.canShare({ files: [file] });
+  if (canShareFile) {
+    try {
+      await navigator.share({ files: [file], title: 'Weight history' });
+      toast('CSV shared');
+      return;
+    } catch (err) {
+      if (err && err.name === 'AbortError') return; // user dismissed the share sheet
+      // any other failure falls through to the download path below
+    }
+  }
+
+  const url = URL.createObjectURL(file);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `weight-history-${todayISO()}.csv`;
+  a.download = filename;
   document.body.append(a);
   a.click();
   a.remove();

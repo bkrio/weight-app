@@ -35,7 +35,10 @@ Data notes:
 - Each entry stores the number **and the unit it was entered in**; toggling
   lbs/kg only converts at display time and never rewrites history.
 - Everything lives in this browser's storage on this device. **Export CSV**
-  (Settings) is your backup — use it now and then.
+  (Settings) is your backup — use it now and then. On iPhone/iPad the export
+  opens the native share sheet (choose **Save to Files** or send it on);
+  on desktop and Android it downloads a `.csv`. Backing up matters more on
+  iOS: if you don't open the app for ~7 days, Safari may clear its stored data.
 
 ## Run locally
 
