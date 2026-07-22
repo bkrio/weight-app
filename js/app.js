@@ -877,13 +877,29 @@ document.addEventListener('visibilitychange', () => {
 });
 window.addEventListener('focus', handleRollover);
 
-if ('serviceWorker' in navigator &&
-    (location.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(location.hostname))) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js').catch((err) => {
-      console.warn('Service worker registration failed:', err);
+// Service worker: registered ONLY on the deployed HTTPS site (that's where
+// offline support matters). On localhost we deliberately DON'T register it —
+// and we tear down any a previous version left behind, plus its caches — so
+// local edits are never masked by a stale cached copy. (Offline still works
+// once deployed.)
+const onLocalhost = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+if ('serviceWorker' in navigator) {
+  if (location.protocol === 'https:' && !onLocalhost) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js').catch((err) => {
+        console.warn('Service worker registration failed:', err);
+      });
     });
-  });
+  } else if (onLocalhost) {
+    navigator.serviceWorker.getRegistrations()
+      .then((regs) => regs.forEach((r) => r.unregister()))
+      .catch(() => {});
+    if (window.caches && caches.keys) {
+      caches.keys()
+        .then((keys) => keys.forEach((k) => { if (k.startsWith('weight-tracker')) caches.delete(k); }))
+        .catch(() => {});
+    }
+  }
 }
 
 safeRefresh();

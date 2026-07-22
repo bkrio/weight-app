@@ -82,8 +82,17 @@ respond). Run it over `http://` instead:
 - **Any platform:** `node tools/serve.mjs` then open the printed URL, or use any
   static server (`npx serve .`).
 
-To test offline: open the app once over localhost, then in DevTools → Network
-tick "Offline" and reload — it should still work.
+The service worker (offline caching) is **only active on the deployed HTTPS
+site**, never on localhost — so what you see locally is always the current
+files, with no stale-cache surprises while you iterate. (Offline is verified on
+the phone after deploying.)
+
+**Not seeing your latest changes on localhost?** If you ran an older version
+before, your browser may still hold its service worker. One-time clear: on the
+`http://localhost:8123/` tab press **Ctrl+Shift+R** (hard reload) two or three
+times. If it still looks old, open DevTools (F12) → **Application** →
+**Service workers** → **Unregister**, then reload. After that, the current build
+removes the localhost service worker for good and it won't recur.
 
 Run the unit tests (data-layer contract, unit conversion, trend/projection math —
 re-run after any `storage.js` change):
