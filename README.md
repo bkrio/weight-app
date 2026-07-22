@@ -37,13 +37,24 @@ What you can log, per day:
 - **Weight** (the morning fast path) and/or **calories** (optional). A day can
   be a weigh-in, a calorie log, or both. Calories are optional and reachable
   later — open the app that evening or the next day, and today's weigh-in is
-  already prefilled so you can add calories without disturbing it. Log a past
-  day's calories via **Log a different day** or the pencil (edit) in History.
+  already prefilled so you can add calories without disturbing it. Use the **‹ ›
+  arrows** by the date to scan to another day, **Jump to a date** for a far one,
+  or the pencil in History.
 - An optional **note** ("traveled", "high sodium").
-- A **goal** (target weight + optional date).
+- A **goal** (target weight + optional date), shown big on the Goal card header.
 - A **phase** (e.g. "Summer cut") with a start date — the "Since start" stat then
   measures from your phase start and is labeled with the phase name. Start a new
-  phase anytime; the most recent one is the active one.
+  phase anytime; the most recent one is active. Once you have a past phase,
+  History grows **tabs** to filter entries by phase.
+
+The **Log** button doubles as a "have I logged today?" cue: it's blue **Log**
+when there's something new to save, and turns grey **✓ Logged** once the fields
+match what's stored. Editing a field flips it back to blue; your saved data
+isn't changed until you press Log again.
+
+Derived stats shown as text: current trend (lbs or kg per week, linear
+regression), a projected goal date, and rolling changes — **1-day** (yesterday →
+today), 7-day, 30-day, since phase/start, and distance to goal.
 
 Data notes:
 

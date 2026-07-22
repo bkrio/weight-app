@@ -33,11 +33,17 @@
       <h1>Weight</h1>
     </header>
 
-    <!-- Morning fast path: open → type weight → Log -->
+    <!-- Morning fast path: open → type weight → Log. Arrows scan between days. -->
     <section class="card" aria-labelledby="entry-title">
-      <div class="card-row">
-        <h2 id="entry-title" class="card-title">Today</h2>
-        <button id="entry-cancel" type="button" class="text-btn" hidden>Cancel</button>
+      <div class="entry-nav">
+        <button id="day-prev" type="button" class="nav-btn" aria-label="Previous day">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
+        <h2 id="entry-title" class="card-title entry-date">Today</h2>
+        <button id="day-next" type="button" class="nav-btn" aria-label="Next day">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
+        </button>
+        <button id="day-today" type="button" class="text-btn" hidden>Today</button>
       </div>
       <form id="entry-form" novalidate>
         <div class="weight-row">
@@ -45,17 +51,21 @@
           <input id="weight-input" type="text" inputmode="decimal" autocomplete="off"
                  placeholder="0.0" enterkeyhint="done" autofocus>
           <span id="weight-unit-suffix" class="unit-suffix">lbs</span>
-          <button type="submit" class="primary-btn">Log</button>
+          <button type="submit" id="log-btn" class="primary-btn">Log</button>
         </div>
-        <label class="visually-hidden" for="note-input">Note (optional)</label>
-        <input id="note-input" type="text" class="note-input" maxlength="200" autocomplete="off"
-               placeholder="Note (optional) — e.g. traveled, high sodium">
-        <label class="visually-hidden" for="calories-input">Calories (optional)</label>
-        <input id="calories-input" type="text" inputmode="numeric" class="note-input" maxlength="6" autocomplete="off"
-               placeholder="Calories (optional) — you can add this tonight or tomorrow">
+        <div class="field-row">
+          <label class="field-inline-label" for="note-input">Note</label>
+          <input id="note-input" type="text" class="text-field" maxlength="200" autocomplete="off"
+                 placeholder="e.g. traveled, high sodium">
+        </div>
+        <div class="field-row">
+          <label class="field-inline-label" for="calories-input">Calories</label>
+          <input id="calories-input" type="text" inputmode="numeric" class="text-field" maxlength="6" autocomplete="off"
+                 placeholder="add tonight or tomorrow">
+        </div>
         <div class="entry-extra">
           <p id="entry-hint" class="hint" aria-live="polite"></p>
-          <button id="other-day-toggle" type="button" class="text-btn subtle">Log a different day</button>
+          <button id="other-day-toggle" type="button" class="text-btn subtle">Jump to a date</button>
           <label class="visually-hidden" for="entry-date-input">Date to log</label>
           <input id="entry-date-input" type="date" min="1900-01-01" hidden>
         </div>
@@ -66,6 +76,11 @@
       <p id="trend-line" class="stat-sentence muted">Loading…</p>
       <p id="projection-line" class="stat-sentence muted"></p>
       <div class="tiles">
+        <div class="tile" id="tile-1d">
+          <span class="tile-label">1-day change</span>
+          <span class="tile-value">—</span>
+          <span class="tile-sub"></span>
+        </div>
         <div class="tile" id="tile-7d">
           <span class="tile-label">7-day change</span>
           <span class="tile-value">—</span>
@@ -99,14 +114,16 @@
     </section>
 
     <section class="card" aria-labelledby="goal-title">
-      <div class="card-row">
-        <h2 id="goal-title" class="card-title">Goal</h2>
+      <div class="card-row goal-head">
+        <div class="goal-head-left">
+          <h2 id="goal-title" class="card-title">Goal</h2>
+          <span id="goal-summary" class="goal-target muted">Not set</span>
+        </div>
         <div class="card-row-actions">
           <button id="goal-edit" type="button" class="text-btn">Set goal</button>
           <button id="goal-clear" type="button" class="text-btn danger" hidden>Clear</button>
         </div>
       </div>
-      <p id="goal-summary" class="hint">No goal set.</p>
       <form id="goal-form" novalidate hidden>
         <div class="weight-row">
           <label class="visually-hidden" for="goal-weight-input">Target weight</label>
@@ -147,6 +164,7 @@
 
     <section class="card" aria-labelledby="history-title">
       <h2 id="history-title" class="card-title" tabindex="-1">History</h2>
+      <div id="history-tabs" class="history-tabs" role="tablist" aria-label="Filter history by phase" hidden></div>
       <ul id="history-list" class="history-list"></ul>
       <p id="history-empty" class="empty">No entries yet.</p>
     </section>

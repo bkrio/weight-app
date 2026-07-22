@@ -211,6 +211,17 @@ await test('changeOverDays uses nearest at-or-before, never interpolates', () =>
   assert.ok(Math.abs(c.delta - -2) < 1e-9);
   assert.equal(c.spanDays, 7);
 });
+await test('changeOverDays 1-day = yesterday vs today, null when yesterday missing', () => {
+  const consec = seq(day0, [200, 199.2]); // day0 and day0+1
+  const c1 = stats.changeOverDays(consec, 'lbs', 1);
+  assert.ok(c1 && Math.abs(c1.delta - -0.8) < 1e-9 && c1.spanDays === 1);
+  // skipped yesterday (2-day gap) -> no 1-day change (baseline too old for the label)
+  const gap = [
+    { date: '2026-06-01', weight: 200, unit: 'lbs', note: '' },
+    { date: '2026-06-03', weight: 199, unit: 'lbs', note: '' },
+  ];
+  assert.equal(stats.changeOverDays(gap, 'lbs', 1), null);
+});
 await test('changeOverDays null when history too short', () => {
   const entries = seq('2026-07-18', [200, 199.5, 199]);
   assert.equal(stats.changeOverDays(entries, 'lbs', 30), null);

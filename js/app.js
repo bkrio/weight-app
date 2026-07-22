@@ -15,12 +15,16 @@ const els = {
   noteInput: $('note-input'),
   caloriesInput: $('calories-input'),
   entryHint: $('entry-hint'),
-  entryCancel: $('entry-cancel'),
+  logBtn: $('log-btn'),
+  dayPrev: $('day-prev'),
+  dayNext: $('day-next'),
+  dayToday: $('day-today'),
   otherDayToggle: $('other-day-toggle'),
   entryDateInput: $('entry-date-input'),
   trendLine: $('trend-line'),
   projectionLine: $('projection-line'),
   tiles: {
+    d1: $('tile-1d'),
     d7: $('tile-7d'),
     d30: $('tile-30d'),
     start: $('tile-start'),
@@ -47,6 +51,7 @@ const els = {
   phaseDateInput: $('phase-date-input'),
   phaseCancel: $('phase-cancel'),
   historyTitle: $('history-title'),
+  historyTabs: $('history-tabs'),
   historyList: $('history-list'),
   historyEmpty: $('history-empty'),
   unitRadios: () => document.querySelectorAll('input[name="unit"]'),
@@ -55,13 +60,14 @@ const els = {
 };
 
 const state = {
-  editingDate: null,      // date being edited via History (title/Cancel differ), else null
-  loadedDate: null,       // which date's values are currently in the form (null = reload needed)
+  formDate: null,         // ISO date the entry form targets (null = not yet initialised)
+  loadedDate: null,       // which date's values are in the fields (null = reload needed)
   original: null,         // existing stored entry for loadedDate (or null)
   prefillWeightStr: '',   // weight string put in the field at prefill (detects "unchanged")
   goalFormOpen: false,    // single source of truth for the goal card's form/buttons
   phaseFormOpen: false,   // same for the phase card
   phaseEditId: null,      // id of the phase being edited (null = starting a new one)
+  historyFilter: 'all',   // 'all' or a phase id — filters the History list
   renderedToday: null,    // catches the date rolling over while the app stays open
 };
 
@@ -72,6 +78,12 @@ const pad2 = (n) => String(n).padStart(2, '0');
 function todayISO() {
   const d = new Date();
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+function addDaysISO(iso, delta) {
+  const [y, m, d] = iso.split('-').map(Number);
+  const dt = new Date(y, m - 1, d + delta);
+  return `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`;
 }
 
 function parseISO(date) {
@@ -164,7 +176,7 @@ async function refresh() {
   renderChartCard(entries, goal, unit);
   renderGoalCard(goal, unit);
   renderPhaseCard(periods);
-  renderHistory(entries, unit);
+  renderHistory(entries, unit, periods);
   renderSettings(settings);
 }
 
@@ -173,13 +185,6 @@ function safeRefresh() {
     console.error(err);
     toast('Could not load data.');
   });
-}
-
-// The entry form represents ONE day's full state. Which day?
-function formTargetDate() {
-  if (state.editingDate) return state.editingDate;
-  if (!els.entryDateInput.hidden && els.entryDateInput.value) return els.entryDateInput.value;
-  return todayISO();
 }
 
 // Load a day's existing values into the fields. Called only when the target day
@@ -199,37 +204,51 @@ function loadDay(date, entries, unit) {
   els.noteInput.value = existing && existing.note ? existing.note : '';
 }
 
+// True when the fields exactly match the stored entry for the shown day — i.e.
+// there is nothing to log.
+function formMatchesSaved() {
+  const o = state.original;
+  if (!o) return false;
+  const weightMatches = els.weightInput.value.trim() === state.prefillWeightStr;
+  const calMatches = els.caloriesInput.value.trim() === (o.calories != null ? String(o.calories) : '');
+  const noteMatches = els.noteInput.value.trim() === (o.note || '');
+  return weightMatches && calMatches && noteMatches;
+}
+
+// The Log button doubles as the "have I logged this day?" cue: grey "✓ Logged"
+// when the fields match what's stored, blue "Log" the moment anything changes.
+function updateLogButton() {
+  const logged = formMatchesSaved();
+  els.logBtn.textContent = logged ? '✓ Logged' : 'Log';
+  els.logBtn.classList.toggle('is-logged', logged);
+}
+
 function entryHintText(target, unit) {
-  if (state.editingDate) return 'Saving replaces this entry.';
   const o = state.original;
   const bits = [];
   if (o && o.weight != null) bits.push(`${formatNumber(convert(o.weight, o.unit, unit))} ${unit}`);
   if (o && o.calories != null) bits.push(`${formatCalories(o.calories)} cal`);
   if (target === todayISO()) {
-    return o ? `Logged today: ${bits.join(', ')} — saving updates it.` : '';
+    return o ? `Logged today: ${bits.join(', ')}` : 'Nothing logged today yet.';
   }
-  return o ? `Logged ${fmtMedium(target)}: ${bits.join(', ')} — saving updates it.` : `Will save to ${fmtMedium(target)}.`;
+  return o ? `Logged: ${bits.join(', ')}` : 'Nothing logged this day.';
 }
 
 function renderEntryCard(entries, unit) {
   const today = todayISO();
+  if (!state.formDate) state.formDate = today;
+  const target = state.formDate;
   els.weightUnitSuffix.textContent = unit;
 
-  const target = formTargetDate();
   if (target !== state.loadedDate) loadDay(target, entries, unit);
 
-  if (state.editingDate) {
-    els.entryTitle.textContent = `Editing ${fmtMedium(state.editingDate)}`;
-  } else {
-    els.entryTitle.textContent = target === today ? fmtWeekday(today) : fmtMedium(target);
-  }
-
-  const backfilling = !state.editingDate && !els.entryDateInput.hidden;
-  els.entryCancel.hidden = !(state.editingDate || backfilling);
-  els.otherDayToggle.hidden = !!state.editingDate || backfilling;
-  els.entryDateInput.max = today;
+  const isToday = target === today;
+  els.entryTitle.textContent = isToday ? fmtWeekday(today) : fmtMedium(target);
+  els.dayNext.disabled = target >= today; // never navigate into the future
+  els.dayToday.hidden = isToday;
 
   els.entryHint.textContent = entryHintText(target, unit);
+  updateLogButton();
 }
 
 function renderStats(entries, goal, unit, periods) {
@@ -334,8 +353,10 @@ function renderStats(entries, goal, unit, periods) {
     }
   };
 
+  const c1 = stats.changeOverDays(entries, unit, 1);
   const c7 = stats.changeOverDays(entries, unit, 7);
   const c30 = stats.changeOverDays(entries, unit, 30);
+  setTile(els.tiles.d1, c1, c1 ? `vs ${fmtShort(c1.fromDate)}` : 'no entry yesterday');
   setTile(els.tiles.d7, c7, c7 ? `vs ${fmtShort(c7.fromDate)}` : undefined);
   setTile(els.tiles.d30, c30, c30 ? `vs ${fmtShort(c30.fromDate)}` : undefined);
 
@@ -391,12 +412,14 @@ function renderGoalCard(goal, unit) {
   els.goalClear.hidden = state.goalFormOpen || !goal;
   if (goal) {
     const target = formatNumber(convert(goal.targetWeight, goal.unit, unit));
-    let text = `Target: ${target} ${unit}`;
+    let text = `${target} ${unit}`;
     if (goal.targetDate) text += ` by ${fmtMedium(goal.targetDate)}`;
     els.goalSummary.textContent = text;
+    els.goalSummary.classList.remove('muted');
     els.goalEdit.textContent = 'Edit';
   } else {
-    els.goalSummary.textContent = 'No goal set.';
+    els.goalSummary.textContent = 'Not set';
+    els.goalSummary.classList.add('muted');
     els.goalEdit.textContent = 'Set goal';
   }
 }
@@ -415,10 +438,67 @@ function renderPhaseCard(periods) {
   }
 }
 
-function renderHistory(entries, unit) {
+// Each phase covers [startDate, next phase's startDate). The current phase runs
+// to the end of time.
+function phaseSpans(periods) {
+  return periods.map((p, i) => ({
+    ...p,
+    startDay: stats.epochDay(p.startDate),
+    endDay: i + 1 < periods.length ? stats.epochDay(periods[i + 1].startDate) : Infinity,
+  }));
+}
+
+function renderHistoryTabs(periods) {
+  els.historyTabs.textContent = '';
+  // Only worth showing once there's a past phase (i.e. 2+ phases).
+  if (periods.length < 2) {
+    els.historyTabs.hidden = true;
+    return;
+  }
+  els.historyTabs.hidden = false;
+  const tabs = [{ id: 'all', name: 'All' }, ...[...periods].reverse()]; // newest phase first
+  for (const t of tabs) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'history-tab' + (state.historyFilter === t.id ? ' is-active' : '');
+    btn.setAttribute('role', 'tab');
+    btn.setAttribute('aria-selected', String(state.historyFilter === t.id));
+    btn.textContent = t.name; // phase name is user text — textContent only
+    btn.addEventListener('click', () => {
+      state.historyFilter = t.id;
+      safeRefresh();
+    });
+    els.historyTabs.append(btn);
+  }
+}
+
+function renderHistory(entries, unit, periods) {
+  // A deleted phase can leave a dangling filter — fall back to All.
+  if (state.historyFilter !== 'all' && !periods.some((p) => p.id === state.historyFilter)) {
+    state.historyFilter = 'all';
+  }
+  renderHistoryTabs(periods);
+
+  let shown = entries;
+  if (state.historyFilter !== 'all') {
+    const span = phaseSpans(periods).find((p) => p.id === state.historyFilter);
+    if (span) {
+      shown = entries.filter((e) => {
+        const day = stats.epochDay(e.date);
+        return day >= span.startDay && day < span.endDay;
+      });
+    }
+  }
+
   els.historyList.textContent = '';
-  els.historyEmpty.hidden = entries.length > 0;
-  const newestFirst = [...entries].reverse();
+  if (shown.length === 0) {
+    els.historyEmpty.hidden = false;
+    els.historyEmpty.textContent = entries.length === 0 ? 'No entries yet.' : 'No entries in this phase.';
+  } else {
+    els.historyEmpty.hidden = true;
+  }
+
+  const newestFirst = [...shown].reverse();
   for (const entry of newestFirst) {
     const li = document.createElement('li');
     li.className = 'history-row';
@@ -463,8 +543,7 @@ function renderHistory(entries, unit) {
       if (!window.confirm(`Delete the entry for ${fmtMedium(entry.date)}?`)) return;
       const res = await withStore(() => store.deleteEntry(entry.date), 'Could not delete the entry.');
       if (!res.ok) return;
-      if (state.editingDate === entry.date) state.editingDate = null;
-      state.loadedDate = null; // the loaded day's data may be gone — reload the form
+      if (state.formDate === entry.date) state.loadedDate = null; // reload the (now-empty) form day
       toast('Entry deleted');
       await safeRefresh();
       els.historyTitle.focus(); // the focused button's row is gone — re-anchor keyboard users
@@ -482,77 +561,65 @@ function renderSettings(settings) {
   }
 }
 
-// ---------- entry form ----------
+// ---------- entry form: day navigation ----------
+
+function goToDay(date) {
+  state.formDate = date;
+  els.entryDateInput.hidden = true;
+  safeRefresh();
+}
 
 function startEdit(entry) {
-  state.editingDate = entry.date;
+  state.formDate = entry.date;
   state.loadedDate = null; // force loadDay on the next render
   els.entryDateInput.hidden = true;
-  els.entryDateInput.value = '';
   safeRefresh().then(() => {
     els.entryForm.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' });
     els.weightInput.focus();
   });
 }
 
-// Return the form to "today", discarding any edit/backfill state.
-function resetForm() {
-  state.editingDate = null;
-  els.entryDateInput.hidden = true;
-  els.entryDateInput.value = '';
-  state.loadedDate = null; // reload today's values on the next render
-}
-
-els.entryCancel.addEventListener('click', () => {
-  resetForm();
-  safeRefresh();
+els.dayPrev.addEventListener('click', () => goToDay(addDaysISO(state.formDate || todayISO(), -1)));
+els.dayNext.addEventListener('click', () => {
+  const next = addDaysISO(state.formDate || todayISO(), 1);
+  if (next <= todayISO()) goToDay(next);
 });
+els.dayToday.addEventListener('click', () => goToDay(todayISO()));
 
 els.otherDayToggle.addEventListener('click', () => {
   els.entryDateInput.hidden = false;
   els.entryDateInput.max = todayISO();
-  els.entryDateInput.value = todayISO();
+  els.entryDateInput.value = state.formDate || todayISO();
   els.entryDateInput.focus();
-  safeRefresh();
 });
 
 els.entryDateInput.addEventListener('change', () => {
-  safeRefresh(); // target day changed -> renderEntryCard reloads that day's values
+  const picked = els.entryDateInput.value;
+  if (!picked) return;
+  if (picked > todayISO()) {
+    toast('No future dates — this app never invents data.');
+    return;
+  }
+  if (picked < '1900-01-01') {
+    toast('That date looks wrong — double-check the year.');
+    return;
+  }
+  goToDay(picked);
 });
+
+// Live button cue: any edit flips "✓ Logged" back to "Log".
+for (const input of [els.weightInput, els.noteInput, els.caloriesInput]) {
+  input.addEventListener('input', updateLogButton);
+}
 
 els.entryForm.addEventListener('submit', async (ev) => {
   ev.preventDefault();
-  const editing = Boolean(state.editingDate);
-  const backfilling = !editing && !els.entryDateInput.hidden;
+  const date = state.formDate || todayISO();
 
-  // The date can roll over while the app stays open (desktop past midnight).
-  // Don't stamp a day the UI never showed — re-render and re-ask.
-  if (!editing && !backfilling && state.renderedToday && state.renderedToday !== todayISO()) {
-    await safeRefresh();
-    toast("It's a new day — check the date, then log again.");
+  // Nothing changed since it was stored — treat the "✓ Logged" button as inert.
+  if (state.original && formMatchesSaved()) {
+    toast('Already logged for this day.');
     return;
-  }
-
-  let date;
-  if (editing) {
-    date = state.editingDate;
-  } else if (backfilling) {
-    date = els.entryDateInput.value;
-    if (!date) {
-      toast('Pick a date, or cancel.');
-      els.entryDateInput.focus();
-      return;
-    }
-    if (date > todayISO()) {
-      toast('No future dates — this app never invents data.');
-      return;
-    }
-    if (date < '1900-01-01') {
-      toast('That date looks wrong — double-check the year.');
-      return;
-    }
-  } else {
-    date = todayISO();
   }
 
   // Weight — optional (a day can be calories-only).
@@ -595,20 +662,6 @@ els.entryForm.addEventListener('submit', async (ev) => {
   const settings = await store.getSettings();
   const note = els.noteInput.value.trim();
 
-  // Backfilling over an existing entry is destructive and easy to hit by
-  // mis-picking a date — confirm it (today's overwrite is by design and the
-  // card already says so).
-  if (!editing && date !== todayISO()) {
-    const existing =
-      state.original && state.original.date === date ? state.original : await store.getEntry(date);
-    if (existing) {
-      const parts = [];
-      if (existing.weight != null) parts.push(`${formatNumber(convert(existing.weight, existing.unit, settings.unit))} ${settings.unit}`);
-      if (existing.calories != null) parts.push(`${formatCalories(existing.calories)} cal`);
-      if (!window.confirm(`Replace the ${fmtMedium(date)} entry (${parts.join(', ')})?`)) return;
-    }
-  }
-
   // If the weight field is unchanged from what was prefilled, keep the ORIGINAL
   // raw weight + unit — so re-logging (e.g. just to add calories) never
   // re-rounds or unit-shifts the stored measurement.
@@ -627,8 +680,9 @@ els.entryForm.addEventListener('submit', async (ev) => {
   const entry = { date, weight: outWeight, unit: outUnit, note, calories };
   const res = await withStore(() => store.saveEntry(entry), 'Could not save — storage failed.');
   if (!res.ok) return;
-  toast(editing ? 'Updated' : 'Logged');
-  resetForm();
+  const wasLogged = Boolean(state.original);
+  toast(wasLogged ? 'Updated' : 'Logged');
+  state.loadedDate = null; // reload the saved values so the button flips to "✓ Logged"
   safeRefresh();
 });
 
@@ -805,20 +859,23 @@ els.exportBtn.addEventListener('click', async () => {
 // Re-render (chart colors, etc.) when the OS theme flips.
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => safeRefresh());
 
-// If the app sits open overnight (common for a home-screen app), catch the
-// date rollover when it becomes visible or focused again. (The submit handler
-// also checks, for the window-stayed-visible-past-midnight case.)
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && state.renderedToday !== todayISO()) {
-    safeRefresh();
+// If the app sits open across midnight, catch the rollover when it becomes
+// visible/focused again. If the form was tracking "today", follow into the new
+// day; if it was parked on a specific past day, leave it there.
+function handleRollover() {
+  const t = todayISO();
+  if (!state.renderedToday || state.renderedToday === t) return;
+  if (state.formDate === state.renderedToday) {
+    state.formDate = t;
+    state.loadedDate = null;
   }
-});
+  safeRefresh();
+}
 
-window.addEventListener('focus', () => {
-  if (state.renderedToday && state.renderedToday !== todayISO()) {
-    safeRefresh();
-  }
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') handleRollover();
 });
+window.addEventListener('focus', handleRollover);
 
 if ('serviceWorker' in navigator &&
     (location.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(location.hostname))) {

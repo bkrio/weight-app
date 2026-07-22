@@ -99,7 +99,61 @@ body {
   gap: 8px;
 }
 
-.card-row-actions { display: flex; gap: 4px; }
+.card-row-actions { display: flex; gap: 4px; flex-shrink: 0; }
+
+/* Entry day-navigator: ‹ date › with a Today shortcut */
+.entry-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.entry-nav .entry-date {
+  flex: 1;
+  margin: 0;
+  text-align: center;
+  color: var(--ink-primary);
+  font-size: 16px;
+}
+
+.nav-btn {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--ink-secondary);
+  cursor: pointer;
+  border-radius: 10px;
+}
+
+.nav-btn:hover:not(:disabled) { color: var(--ink-primary); background: var(--border); }
+.nav-btn:disabled { color: var(--ink-muted); opacity: 0.4; cursor: default; }
+
+#day-today { flex-shrink: 0; }
+
+/* Goal card header: title + prominent target, actions on the right */
+.goal-head { align-items: baseline; }
+
+.goal-head-left {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.goal-target {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink-primary);
+}
+
+.goal-target.muted { color: var(--ink-muted); font-weight: 400; }
 
 /* ---------- entry form (the fast path) ---------- */
 
@@ -168,6 +222,22 @@ body {
 
 .text-field::placeholder { color: var(--ink-muted); }
 
+/* Labeled input row (Note / Calories) — label to the left of the field */
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.field-inline-label {
+  flex: 0 0 66px;
+  font-size: 13px;
+  color: var(--ink-secondary);
+}
+
+.field-row .text-field { flex: 1; min-width: 0; }
+
 .entry-extra {
   display: flex;
   align-items: center;
@@ -198,6 +268,14 @@ button { font-family: inherit; }
 }
 
 .primary-btn:active { filter: brightness(0.92); }
+
+/* "Already logged for this day" state — grey with a check, flips back to blue
+   "Log" the moment the fields change. */
+.primary-btn.is-logged {
+  background: var(--baseline);
+  color: var(--ink-primary);
+}
+.primary-btn.is-logged:active { filter: none; }
 
 .secondary-btn {
   background: transparent;
@@ -342,6 +420,35 @@ input[type="date"] {
 }
 
 /* ---------- history ---------- */
+
+.history-tabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  margin-bottom: 10px;
+  padding-bottom: 2px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.history-tab {
+  flex-shrink: 0;
+  background: none;
+  border: 1px solid var(--baseline);
+  color: var(--ink-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  min-height: 34px;
+}
+
+.history-tab.is-active {
+  background: var(--accent-fill);
+  color: #ffffff;
+  border-color: var(--accent-fill);
+}
 
 .history-list {
   list-style: none;
