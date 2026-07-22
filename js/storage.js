@@ -4,8 +4,12 @@
 // implementation (Supabase, etc.) can replace the internals of THIS FILE with
 // zero changes to any caller:
 //
-//   saveEntry(entry)    entry:    { date:'YYYY-MM-DD', weight:number>0, unit:'lbs'|'kg', note?:string }
-//                       upserts by date — one entry per day.
+//   entry shape: { date:'YYYY-MM-DD', weight:number>0|null, unit:'lbs'|'kg',
+//                  note?:string, calories:int>=0|null }
+//                An entry must have a weight, calories, or both (a day can be a
+//                weigh-in, a calorie log, or both).
+//
+//   saveEntry(entry)    upserts by date — one entry per day.
 //   getEntry(date)      -> entry | null
 //   getAllEntries()     -> entry[] sorted by date ascending
 //   deleteEntry(date)   -> true if an entry existed and was removed
@@ -14,7 +18,11 @@
 //   getGoal()           -> goal | null
 //   saveSettings(s)     s: { unit:'lbs'|'kg' }
 //   getSettings()       -> settings (defaults to { unit:'lbs' } if never set)
-//   exportCSV()         -> CSV string: date,weight,unit,note (RFC 4180 quoting)
+//   getPeriods()        -> period[] sorted by startDate ascending
+//                          period: { id:string, name:string, startDate:'YYYY-MM-DD' }
+//   savePeriod(period)  upserts by id (generates an id when absent) -> period
+//   deletePeriod(id)    -> true if a period existed and was removed
+//   exportCSV()         -> CSV string: date,weight,unit,note,calories (RFC 4180 quoting)
 //
 // No other file may read or write localStorage/IndexedDB.
 
@@ -23,11 +31,13 @@ const KEYS = {
   entries: `${NS}:entries`,
   goal: `${NS}:goal`,
   settings: `${NS}:settings`,
+  periods: `${NS}:periods`,
 };
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const VALID_UNITS = ['lbs', 'kg'];
 const DEFAULT_SETTINGS = { unit: 'lbs' };
+const MAX_CALORIES = 100000; // sanity ceiling; anything at/above is a typo
 
 function readJSON(key, fallback) {
   try {
@@ -38,17 +48,48 @@ function readJSON(key, fallback) {
   }
 }
 
+function writeJSON(key, value) {
+  localStorage.setItem(key, JSON.stringify(value));
+}
+
+function genId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  // Fallback for environments without crypto.randomUUID.
+  return 'p-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+}
+
+// ---------- validators ----------
+
+function validWeight(w) {
+  return typeof w === 'number' && Number.isFinite(w) && w > 0;
+}
+
+function validCalories(c) {
+  return typeof c === 'number' && Number.isFinite(c) && Number.isInteger(c) && c >= 0 && c < MAX_CALORIES;
+}
+
 function isValidEntry(e) {
-  return (
-    e !== null &&
-    typeof e === 'object' &&
-    typeof e.date === 'string' &&
-    DATE_RE.test(e.date) &&
-    typeof e.weight === 'number' &&
-    Number.isFinite(e.weight) &&
-    e.weight > 0 &&
-    VALID_UNITS.includes(e.unit)
-  );
+  if (e === null || typeof e !== 'object') return false;
+  if (typeof e.date !== 'string' || !DATE_RE.test(e.date)) return false;
+  if (!VALID_UNITS.includes(e.unit)) return false;
+  const hasW = e.weight != null;
+  const hasC = e.calories != null;
+  if (!hasW && !hasC) return false;             // a day must carry something
+  if (hasW && !validWeight(e.weight)) return false;
+  if (hasC && !validCalories(e.calories)) return false;
+  return true;
+}
+
+function normalizeStoredEntry(e) {
+  return {
+    date: e.date,
+    weight: e.weight != null ? e.weight : null,
+    unit: e.unit,
+    note: typeof e.note === 'string' ? e.note : '',
+    calories: e.calories != null ? e.calories : null,
+  };
 }
 
 // Entries map, shape-validated: parseable-but-wrong-shape data (schema drift,
@@ -60,25 +101,15 @@ function readEntriesMap() {
   const clean = {};
   for (const [date, entry] of Object.entries(raw)) {
     if (isValidEntry(entry) && entry.date === date) {
-      clean[date] = { ...entry, note: typeof entry.note === 'string' ? entry.note : '' };
+      clean[date] = normalizeStoredEntry(entry);
     }
   }
   return clean;
 }
 
-function writeJSON(key, value) {
-  localStorage.setItem(key, JSON.stringify(value));
-}
-
 function assertDate(date, what = 'date') {
   if (typeof date !== 'string' || !DATE_RE.test(date)) {
     throw new TypeError(`${what} must be a 'YYYY-MM-DD' string, got: ${JSON.stringify(date)}`);
-  }
-}
-
-function assertWeight(weight, what = 'weight') {
-  if (typeof weight !== 'number' || !Number.isFinite(weight) || weight <= 0) {
-    throw new TypeError(`${what} must be a finite number > 0, got: ${JSON.stringify(weight)}`);
   }
 }
 
@@ -88,15 +119,28 @@ function assertUnit(unit) {
   }
 }
 
+// ---------- entries ----------
+
 export async function saveEntry(entry) {
   assertDate(entry?.date);
-  assertWeight(entry?.weight);
   assertUnit(entry?.unit);
+  const hasW = entry?.weight != null;
+  const hasC = entry?.calories != null;
+  if (!hasW && !hasC) {
+    throw new TypeError('entry must include a weight, calories, or both');
+  }
+  if (hasW && !validWeight(entry.weight)) {
+    throw new TypeError(`weight must be a finite number > 0, got: ${JSON.stringify(entry.weight)}`);
+  }
+  if (hasC && !validCalories(entry.calories)) {
+    throw new TypeError(`calories must be a whole number in [0, ${MAX_CALORIES}), got: ${JSON.stringify(entry.calories)}`);
+  }
   const clean = {
     date: entry.date,
-    weight: entry.weight,
+    weight: hasW ? entry.weight : null,
     unit: entry.unit,
     note: typeof entry.note === 'string' ? entry.note.trim() : '',
+    calories: hasC ? entry.calories : null,
   };
   const entries = readEntriesMap();
   entries[clean.date] = clean;
@@ -125,12 +169,16 @@ export async function deleteEntry(date) {
   return true;
 }
 
+// ---------- goal ----------
+
 export async function saveGoal(goal) {
   if (goal === null) {
     localStorage.removeItem(KEYS.goal);
     return null;
   }
-  assertWeight(goal?.targetWeight, 'targetWeight');
+  if (!validWeight(goal?.targetWeight)) {
+    throw new TypeError(`targetWeight must be a finite number > 0, got: ${JSON.stringify(goal?.targetWeight)}`);
+  }
   assertUnit(goal?.unit);
   if (goal.targetDate != null) assertDate(goal.targetDate, 'targetDate');
   const clean = {
@@ -144,20 +192,15 @@ export async function saveGoal(goal) {
 
 export async function getGoal() {
   const goal = readJSON(KEYS.goal, null);
-  if (
-    goal === null ||
-    typeof goal !== 'object' ||
-    typeof goal.targetWeight !== 'number' ||
-    !Number.isFinite(goal.targetWeight) ||
-    goal.targetWeight <= 0 ||
-    !VALID_UNITS.includes(goal.unit)
-  ) {
+  if (goal === null || typeof goal !== 'object' || !validWeight(goal.targetWeight) || !VALID_UNITS.includes(goal.unit)) {
     return null; // wrong-shape goal degrades to "no goal", same as corrupt JSON
   }
   const targetDate =
     typeof goal.targetDate === 'string' && DATE_RE.test(goal.targetDate) ? goal.targetDate : null;
   return { targetWeight: goal.targetWeight, unit: goal.unit, targetDate };
 }
+
+// ---------- settings ----------
 
 export async function saveSettings(settings) {
   assertUnit(settings?.unit);
@@ -171,6 +214,58 @@ export async function getSettings() {
   return s && VALID_UNITS.includes(s.unit) ? { unit: s.unit } : { ...DEFAULT_SETTINGS };
 }
 
+// ---------- phases / periods ----------
+
+function isValidPeriod(p) {
+  return (
+    p !== null &&
+    typeof p === 'object' &&
+    typeof p.id === 'string' &&
+    p.id.length > 0 &&
+    typeof p.name === 'string' &&
+    p.name.trim().length > 0 &&
+    typeof p.startDate === 'string' &&
+    DATE_RE.test(p.startDate)
+  );
+}
+
+function readPeriods() {
+  const raw = readJSON(KEYS.periods, []);
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter(isValidPeriod)
+    .map((p) => ({ id: p.id, name: p.name.trim(), startDate: p.startDate }));
+}
+
+export async function getPeriods() {
+  return readPeriods().sort((a, b) =>
+    a.startDate < b.startDate ? -1 : a.startDate > b.startDate ? 1 : 0
+  );
+}
+
+export async function savePeriod(period) {
+  assertDate(period?.startDate, 'startDate');
+  if (typeof period?.name !== 'string' || period.name.trim() === '') {
+    throw new TypeError('period name is required');
+  }
+  const id = typeof period.id === 'string' && period.id ? period.id : genId();
+  const clean = { id, name: period.name.trim(), startDate: period.startDate };
+  const periods = readPeriods().filter((p) => p.id !== id);
+  periods.push(clean);
+  writeJSON(KEYS.periods, periods);
+  return { ...clean };
+}
+
+export async function deletePeriod(id) {
+  const periods = readPeriods();
+  const next = periods.filter((p) => p.id !== id);
+  if (next.length === periods.length) return false;
+  writeJSON(KEYS.periods, next);
+  return true;
+}
+
+// ---------- export ----------
+
 export async function exportCSV() {
   const entries = await getAllEntries();
   const escape = (value) => {
@@ -181,6 +276,8 @@ export async function exportCSV() {
     if (/^[=+\-@]/.test(s)) s = ' ' + s;
     return /[",\n\r]/.test(s) ? `"${s.replaceAll('"', '""')}"` : s;
   };
-  const rows = entries.map((e) => [e.date, e.weight, e.unit, e.note].map(escape).join(','));
-  return ['date,weight,unit,note', ...rows].join('\r\n') + '\r\n';
+  const rows = entries.map((e) =>
+    [e.date, e.weight ?? '', e.unit, e.note, e.calories ?? ''].map(escape).join(',')
+  );
+  return ['date,weight,unit,note,calories', ...rows].join('\r\n') + '\r\n';
 }

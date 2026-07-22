@@ -36,9 +36,12 @@ export function dayToISO(day) {
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
 }
 
-// -> [{date, day, w}] sorted ascending, weights converted to `unit`
+// -> [{date, day, w}] sorted ascending, weights converted to `unit`.
+// Calorie-only days (no weight) are dropped — they are never weight data points,
+// so they never affect the trend, chart, or since-start math.
 function normalize(entries, unit) {
   return entries
+    .filter((e) => e.weight != null && Number.isFinite(e.weight))
     .map((e) => ({ date: e.date, day: epochDay(e.date), w: convert(e.weight, e.unit, unit) }))
     .sort((a, b) => a.day - b.day);
 }
@@ -156,6 +159,23 @@ export function changeOverDays(entries, unit, daysBack) {
 // Latest vs the very first entry. Null with fewer than 2 entries.
 export function sinceStart(entries, unit) {
   const pts = normalize(entries, unit);
+  if (pts.length < 2) return null;
+  const first = pts[0];
+  const latest = pts[pts.length - 1];
+  return {
+    delta: latest.w - first.w,
+    fromDate: first.date,
+    toDate: latest.date,
+    spanDays: latest.day - first.day,
+  };
+}
+
+// Change since the start of a named phase: baseline = first weigh-in ON OR AFTER
+// startDate; latest = last weigh-in. Null until there are two weigh-ins within
+// the phase to compare. Never interpolated.
+export function sincePhaseStart(entries, startDate, unit) {
+  const startDay = epochDay(startDate);
+  const pts = normalize(entries, unit).filter((p) => p.day >= startDay);
   if (pts.length < 2) return null;
   const first = pts[0];
   const latest = pts[pts.length - 1];

@@ -94,12 +94,15 @@ const crosshairPlugin = {
 export function renderChart(canvas, entries, goal, unit) {
   const tk = tokens();
 
-  const data = entries.map((e) => ({
-    x: localDateMs(e.date),
-    y: round1(convert(e.weight, e.unit, unit)),
-    date: e.date,
-    note: e.note,
-  }));
+  const data = entries
+    .filter((e) => e.weight != null && Number.isFinite(e.weight)) // calorie-only days aren't plotted
+    .map((e) => ({
+      x: localDateMs(e.date),
+      y: round1(convert(e.weight, e.unit, unit)),
+      date: e.date,
+      note: e.note,
+      calories: e.calories,
+    }));
   const goalY = goal ? round1(convert(goal.targetWeight, goal.unit, unit)) : null;
 
   const ys = data.map((p) => p.y).concat(goalY != null ? [goalY] : []);
@@ -203,7 +206,13 @@ export function renderChart(canvas, entries, goal, unit) {
           callbacks: {
             title: (items) => formatTooltipDate(items[0].raw.date),
             label: (item) => `${formatNumber(item.raw.y)} ${unit}`,
-            footer: (items) => items[0].raw.note || '',
+            footer: (items) => {
+              const r = items[0].raw;
+              const parts = [];
+              if (r.calories != null) parts.push(`${r.calories.toLocaleString()} cal`);
+              if (r.note) parts.push(r.note);
+              return parts.join(' · ');
+            },
           },
         },
       },

@@ -20,12 +20,20 @@
   <script type="module" src="./js/app.js"></script>
 </head>
 <body>
+  <!-- Shown only when opened as a file:// — ES modules can't load there, so the
+       app would appear dead. This inline (non-module) script still runs. -->
+  <div id="file-warning" class="file-warning" role="alert" hidden>
+    ⚠️ <strong>This app must be opened from a web address (http/https), not as a file.</strong>
+    Double-click <code>run-local.cmd</code> to launch it locally, or deploy it — see the README.
+    Nothing on the page works on a <code>file://</code> address.
+  </div>
+
   <main class="wrap">
     <header class="app-header">
       <h1>Weight</h1>
     </header>
 
-    <!-- Morning fast path: open → type → Save -->
+    <!-- Morning fast path: open → type weight → Log -->
     <section class="card" aria-labelledby="entry-title">
       <div class="card-row">
         <h2 id="entry-title" class="card-title">Today</h2>
@@ -37,11 +45,14 @@
           <input id="weight-input" type="text" inputmode="decimal" autocomplete="off"
                  placeholder="0.0" enterkeyhint="done" autofocus>
           <span id="weight-unit-suffix" class="unit-suffix">lbs</span>
-          <button type="submit" class="primary-btn">Save</button>
+          <button type="submit" class="primary-btn">Log</button>
         </div>
         <label class="visually-hidden" for="note-input">Note (optional)</label>
         <input id="note-input" type="text" class="note-input" maxlength="200" autocomplete="off"
                placeholder="Note (optional) — e.g. traveled, high sodium">
+        <label class="visually-hidden" for="calories-input">Calories (optional)</label>
+        <input id="calories-input" type="text" inputmode="numeric" class="note-input" maxlength="6" autocomplete="off"
+               placeholder="Calories (optional) — you can add this tonight or tomorrow">
         <div class="entry-extra">
           <p id="entry-hint" class="hint" aria-live="polite"></p>
           <button id="other-day-toggle" type="button" class="text-btn subtle">Log a different day</button>
@@ -111,6 +122,29 @@
       </form>
     </section>
 
+    <section class="card" aria-labelledby="phase-title">
+      <div class="card-row">
+        <h2 id="phase-title" class="card-title">Phase</h2>
+        <div class="card-row-actions">
+          <button id="phase-new" type="button" class="text-btn" hidden>New</button>
+          <button id="phase-edit" type="button" class="text-btn">Start phase</button>
+          <button id="phase-clear" type="button" class="text-btn danger" hidden>Clear</button>
+        </div>
+      </div>
+      <p id="phase-summary" class="hint">No phase set — “Since start” uses your first entry.</p>
+      <form id="phase-form" novalidate hidden>
+        <label class="field-label" for="phase-name-input">Name</label>
+        <input id="phase-name-input" type="text" class="text-field" maxlength="40" autocomplete="off"
+               placeholder="e.g. Summer cut">
+        <label class="field-label" for="phase-date-input">Start date</label>
+        <input id="phase-date-input" type="date" min="1900-01-01">
+        <div class="form-actions">
+          <button type="submit" class="primary-btn">Save phase</button>
+          <button id="phase-cancel" type="button" class="text-btn">Cancel</button>
+        </div>
+      </form>
+    </section>
+
     <section class="card" aria-labelledby="history-title">
       <h2 id="history-title" class="card-title" tabindex="-1">History</h2>
       <ul id="history-list" class="history-list"></ul>
@@ -122,7 +156,7 @@
       <div class="settings-row">
         <span class="field-label" id="unit-label">Units</span>
         <div class="segmented" role="radiogroup" aria-labelledby="unit-label">
-          <label class="segment"><input type="radio" name="unit" value="lbs"><span>lbs</span></label>
+          <label class="segment"><input type="radio" name="unit" value="lbs" checked><span>lbs</span></label>
           <label class="segment"><input type="radio" name="unit" value="kg"><span>kg</span></label>
         </div>
       </div>
@@ -139,5 +173,14 @@
   </main>
 
   <div id="toast" class="toast" role="status"></div>
+
+  <script>
+    // Classic (non-module) script: runs even on file://, where the module app.js
+    // cannot load. Warn the user instead of leaving a silently-dead page.
+    if (location.protocol === 'file:') {
+      var w = document.getElementById('file-warning');
+      if (w) w.hidden = false;
+    }
+  </script>
 </body>
 </html>

@@ -4,7 +4,7 @@
 // IMPORTANT: bump CACHE_VERSION whenever you change any file in ASSETS,
 // otherwise installed phones keep serving the old cached copy.
 
-const CACHE_VERSION = 'weight-tracker-v2';
+const CACHE_VERSION = 'weight-tracker-v3';
 
 const ASSETS = [
   './',

@@ -9,10 +9,11 @@ screen as a standalone app.
 
 **All reads/writes go through `js/storage.js`.** It exposes a fully async
 interface (`saveEntry`, `getEntry`, `getAllEntries`, `deleteEntry`, `saveGoal`,
-`getGoal`, `saveSettings`, `getSettings`, `exportCSV`) and is the **only** file
-that touches `localStorage`. Swapping to a cloud backend (e.g. Supabase) later
-means rewriting the internals of that one file — every caller already awaits
-Promises, so nothing else changes.
+`getGoal`, `saveSettings`, `getSettings`, `getPeriods`, `savePeriod`,
+`deletePeriod`, `exportCSV`) and is the **only** file that touches
+`localStorage`. Swapping to a cloud backend (e.g. Supabase) later means
+rewriting the internals of that one file — every caller already awaits Promises,
+so nothing else changes.
 
 ```
 index.html         single page
@@ -26,13 +27,30 @@ vendor/            Chart.js + date adapter (vendored so offline works)
 sw.js              service worker: precache app shell, cache-first
 manifest.json      PWA manifest (standalone display)
 icons/             app icons (any + maskable + apple-touch)
+tools/serve.mjs    tiny local test server (no dependencies)
+run-local.cmd      double-click to test locally on Windows
+tests/run-tests.mjs  unit tests for the data + math layers
 ```
+
+What you can log, per day:
+
+- **Weight** (the morning fast path) and/or **calories** (optional). A day can
+  be a weigh-in, a calorie log, or both. Calories are optional and reachable
+  later — open the app that evening or the next day, and today's weigh-in is
+  already prefilled so you can add calories without disturbing it. Log a past
+  day's calories via **Log a different day** or the pencil (edit) in History.
+- An optional **note** ("traveled", "high sodium").
+- A **goal** (target weight + optional date).
+- A **phase** (e.g. "Summer cut") with a start date — the "Since start" stat then
+  measures from your phase start and is labeled with the phase name. Start a new
+  phase anytime; the most recent one is the active one.
 
 Data notes:
 
-- One entry per day; saving again the same day overwrites. Missed days stay
-  gaps — nothing is interpolated or invented.
-- Each entry stores the number **and the unit it was entered in**; toggling
+- One entry per day; saving again the same day updates it. Missed days stay
+  gaps — nothing is interpolated or invented. Calorie-only days never appear on
+  the weight graph or affect the weight trend.
+- Weight is stored as the raw number **and the unit it was entered in**; toggling
   lbs/kg only converts at display time and never rewrites history.
 - Everything lives in this browser's storage on this device. **Export CSV**
   (Settings) is your backup — use it now and then. On iPhone/iPad the export
@@ -40,24 +58,24 @@ Data notes:
   on desktop and Android it downloads a `.csv`. Backing up matters more on
   iOS: if you don't open the app for ~7 days, Safari may clear its stored data.
 
-## Run locally
+## Run locally (test on your computer)
 
-ES modules and service workers need `http://`, not `file://`, so serve the
-folder with any static server:
+The app is built as ES modules, which browsers **block on `file://`** — so
+double-clicking `index.html` makes it look dead (nothing saves, buttons don't
+respond). Run it over `http://` instead:
 
-```bash
-cd weight-tracker
-npx serve .            # or: npx http-server -p 8080 .
-```
+- **Quickest (Windows):** double-click **`run-local.cmd`**. It starts a tiny
+  local server and opens `http://localhost:8123/` in your browser. Keep the
+  little black window open while you use it; close it to stop. (If the page
+  doesn't load on the very first open, refresh once.)
+- **Any platform:** `node tools/serve.mjs` then open the printed URL, or use any
+  static server (`npx serve .`).
 
-Open the printed `http://localhost:…` URL. (Node.js is the only requirement;
-any other static server works too.)
+To test offline: open the app once over localhost, then in DevTools → Network
+tick "Offline" and reload — it should still work.
 
-To test offline: open the app once, then in DevTools → Network tick
-"Offline" and reload — it should still work.
-
-To run the unit tests (37 checks over the storage contract, unit conversion,
-and the trend/projection math — re-run these after any storage.js rewrite):
+Run the unit tests (data-layer contract, unit conversion, trend/projection math —
+re-run after any `storage.js` change):
 
 ```bash
 node tests/run-tests.mjs
@@ -113,7 +131,8 @@ your PC — so do this after deploying.
 
 ## CSV export format
 
-`date,weight,unit,note` — one row per entry, dates as `YYYY-MM-DD`, weight as
-the raw number in the unit it was entered in. Notes are RFC-4180 quoted, so
-commas/quotes in notes are safe. A note starting with `=`, `+`, `-`, or `@`
+`date,weight,unit,note,calories` — one row per entry, dates as `YYYY-MM-DD`,
+weight as the raw number in the unit it was entered in (blank on a calorie-only
+day), calories as a whole number (blank when none). Notes are RFC-4180 quoted,
+so commas/quotes in notes are safe. A note starting with `=`, `+`, `-`, or `@`
 gets a leading space so spreadsheet apps don't misread it as a formula.

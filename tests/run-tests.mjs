@@ -56,7 +56,7 @@ await test('formatSigned', () => {
 // ---------------- storage ----------------
 await test('saveEntry/getEntry round trip + trims note', async () => {
   const saved = await store.saveEntry({ date: '2026-07-01', weight: 182.4, unit: 'lbs', note: '  traveled  ' });
-  assert.deepEqual(saved, { date: '2026-07-01', weight: 182.4, unit: 'lbs', note: 'traveled' });
+  assert.deepEqual(saved, { date: '2026-07-01', weight: 182.4, unit: 'lbs', note: 'traveled', calories: null });
   assert.deepEqual(await store.getEntry('2026-07-01'), saved);
 });
 await test('getEntry missing -> null', async () => {
@@ -110,9 +110,9 @@ await test('exportCSV escapes commas and quotes', async () => {
   await store.saveEntry({ date: '2026-07-02', weight: 182.0, unit: 'kg', note: '' });
   const csv = await store.exportCSV();
   const lines = csv.trimEnd().split('\r\n');
-  assert.equal(lines[0], 'date,weight,unit,note');
-  assert.equal(lines[1], '2026-07-01,182.4,lbs,"salty, ""big"" dinner"');
-  assert.equal(lines[2], '2026-07-02,182,kg,');
+  assert.equal(lines[0], 'date,weight,unit,note,calories');
+  assert.equal(lines[1], '2026-07-01,182.4,lbs,"salty, ""big"" dinner",');
+  assert.equal(lines[2], '2026-07-02,182,kg,,');
 });
 
 // ---------------- stats ----------------
@@ -232,8 +232,8 @@ await test('CSV neutralizes formula-leading notes with a space', async () => {
   await store.saveEntry({ date: '2026-07-03', weight: 181, unit: 'lbs', note: '+2 after holiday dinner' });
   await store.saveEntry({ date: '2026-07-04', weight: 181, unit: 'lbs', note: '=SUM(A1)' });
   const lines = (await store.exportCSV()).trimEnd().split('\r\n');
-  assert.equal(lines[1], '2026-07-03,181,lbs, +2 after holiday dinner');
-  assert.equal(lines[2], '2026-07-04,181,lbs, =SUM(A1)');
+  assert.equal(lines[1], '2026-07-03,181,lbs, +2 after holiday dinner,');
+  assert.equal(lines[2], '2026-07-04,181,lbs, =SUM(A1),');
 });
 await test('getGoal rejects wrong-shape goal objects', async () => {
   backing.set('weight-tracker:goal', '{}');
@@ -293,6 +293,133 @@ await test('changeOverDays refuses a baseline far older than the label (7-day ov
     7
   );
   assert.ok(ok && ok.spanDays === 10);
+});
+
+// ---------------- calories ----------------
+await test('saveEntry round-trips calories', async () => {
+  backing.clear();
+  const saved = await store.saveEntry({ date: '2026-07-01', weight: 180, unit: 'lbs', calories: 1850, note: 'x' });
+  assert.equal(saved.calories, 1850);
+  assert.equal((await store.getEntry('2026-07-01')).calories, 1850);
+});
+await test('calorie-only entry (no weight) is allowed and stores weight:null', async () => {
+  backing.clear();
+  const saved = await store.saveEntry({ date: '2026-07-02', unit: 'lbs', calories: 2000 });
+  assert.equal(saved.weight, null);
+  assert.equal(saved.calories, 2000);
+  const all = await store.getAllEntries();
+  assert.equal(all.length, 1);
+  assert.equal(all[0].weight, null);
+});
+await test('adding calories to a day preserves its weight (full-day replace)', async () => {
+  backing.clear();
+  await store.saveEntry({ date: '2026-07-03', weight: 178.4, unit: 'lbs' });
+  // re-save the same day carrying the existing weight forward, plus calories
+  await store.saveEntry({ date: '2026-07-03', weight: 178.4, unit: 'lbs', calories: 1700 });
+  const e = await store.getEntry('2026-07-03');
+  assert.equal(e.weight, 178.4);
+  assert.equal(e.calories, 1700);
+});
+await test('saveEntry rejects an entry with neither weight nor calories', async () => {
+  await assert.rejects(store.saveEntry({ date: '2026-07-01', unit: 'lbs' }), TypeError);
+  await assert.rejects(store.saveEntry({ date: '2026-07-01', unit: 'lbs', weight: null, calories: null }), TypeError);
+});
+await test('saveEntry rejects bad calories', async () => {
+  await assert.rejects(store.saveEntry({ date: '2026-07-01', unit: 'lbs', calories: -5 }), TypeError);
+  await assert.rejects(store.saveEntry({ date: '2026-07-01', unit: 'lbs', calories: 1850.5 }), TypeError);
+  await assert.rejects(store.saveEntry({ date: '2026-07-01', unit: 'lbs', calories: 100000 }), TypeError);
+});
+await test('exportCSV includes calories column with blanks', async () => {
+  backing.clear();
+  await store.saveEntry({ date: '2026-07-01', weight: 180, unit: 'lbs', calories: 1850 });
+  await store.saveEntry({ date: '2026-07-02', unit: 'lbs', calories: 2000 }); // weight-less
+  await store.saveEntry({ date: '2026-07-03', weight: 179, unit: 'lbs' });    // calorie-less
+  const lines = (await store.exportCSV()).trimEnd().split('\r\n');
+  assert.equal(lines[0], 'date,weight,unit,note,calories');
+  assert.equal(lines[1], '2026-07-01,180,lbs,,1850');
+  assert.equal(lines[2], '2026-07-02,,lbs,,2000');
+  assert.equal(lines[3], '2026-07-03,179,lbs,,');
+});
+await test('calorie-only days do not affect weight math (trend/sinceStart)', () => {
+  const weightDays = seq(day0, Array.from({ length: 14 }, (_, i) => 200 - 0.1 * i));
+  // A calorie-only day BEFORE the first weigh-in must not become the "start".
+  const calOnly = { date: '2026-05-20', weight: null, unit: 'lbs', calories: 2200 };
+  const mixed = [calOnly, ...weightDays];
+  const tPlain = stats.computeTrend(weightDays, 'lbs');
+  const tMixed = stats.computeTrend(mixed, 'lbs');
+  assert.ok(Math.abs(tPlain.slopePerWeek - tMixed.slopePerWeek) < 1e-9);
+  const sPlain = stats.sinceStart(weightDays, 'lbs');
+  const sMixed = stats.sinceStart(mixed, 'lbs');
+  assert.equal(sPlain.fromDate, sMixed.fromDate); // calorie-only 2026-05-20 is NOT the start
+});
+
+// ---------------- readEntriesMap resilience with new shape ----------------
+await test('wrong-shape entries are dropped; calorie-only kept', async () => {
+  backing.set('weight-tracker:entries', JSON.stringify({
+    '2026-07-01': { date: '2026-07-01', weight: 180, unit: 'lbs' },            // ok
+    '2026-07-02': { date: '2026-07-02', unit: 'lbs', calories: 2000 },         // ok (cal-only)
+    '2026-07-03': { date: '2026-07-03', unit: 'lbs' },                         // neither -> drop
+    '2026-07-04': { date: '2026-07-04', weight: 0, unit: 'lbs' },              // bad weight -> drop
+    '2026-07-05': { date: '2026-07-05', unit: 'lbs', calories: -1 },           // bad calories -> drop
+  }));
+  const all = await store.getAllEntries();
+  assert.deepEqual(all.map((e) => e.date), ['2026-07-01', '2026-07-02']);
+});
+
+// ---------------- phases / periods ----------------
+await test('periods: empty -> [], save/get sorted, delete', async () => {
+  backing.clear();
+  assert.deepEqual(await store.getPeriods(), []);
+  const cut = await store.savePeriod({ name: 'Summer cut', startDate: '2026-06-01' });
+  assert.ok(cut.id);
+  await store.savePeriod({ name: 'Maintain', startDate: '2026-07-15' });
+  const periods = await store.getPeriods();
+  assert.deepEqual(periods.map((p) => p.name), ['Summer cut', 'Maintain']); // sorted by startDate
+  // upsert by id
+  await store.savePeriod({ id: cut.id, name: 'Spring cut', startDate: '2026-06-01' });
+  const after = await store.getPeriods();
+  assert.equal(after.length, 2);
+  assert.equal(after[0].name, 'Spring cut');
+  assert.equal(await store.deletePeriod(cut.id), true);
+  assert.equal(await store.deletePeriod(cut.id), false);
+  assert.equal((await store.getPeriods()).length, 1);
+});
+await test('savePeriod requires a name and a valid date', async () => {
+  await assert.rejects(store.savePeriod({ name: '  ', startDate: '2026-06-01' }), TypeError);
+  await assert.rejects(store.savePeriod({ name: 'X', startDate: 'nope' }), TypeError);
+});
+await test('getPeriods drops wrong-shape rows', async () => {
+  backing.set('weight-tracker:periods', JSON.stringify([
+    { id: 'a', name: 'Good', startDate: '2026-06-01' },
+    { id: 'b', name: '', startDate: '2026-06-02' },      // empty name -> drop
+    { name: 'No id', startDate: '2026-06-03' },          // no id -> drop
+    'garbage',
+  ]));
+  const periods = await store.getPeriods();
+  assert.deepEqual(periods.map((p) => p.id), ['a']);
+});
+
+// ---------------- sincePhaseStart ----------------
+await test('sincePhaseStart baselines on the first weigh-in at/after the phase start', () => {
+  const entries = [
+    { date: '2026-06-01', weight: 200, unit: 'lbs' },
+    { date: '2026-06-10', weight: 198, unit: 'lbs' }, // phase starts here
+    { date: '2026-06-20', weight: 194, unit: 'lbs' },
+  ];
+  const sp = stats.sincePhaseStart(entries, '2026-06-10', 'lbs');
+  assert.equal(sp.fromDate, '2026-06-10');
+  assert.ok(Math.abs(sp.delta - -4) < 1e-9); // 194 - 198
+});
+await test('sincePhaseStart ignores calorie-only days and needs 2 weigh-ins', () => {
+  const entries = [
+    { date: '2026-06-10', weight: 198, unit: 'lbs' },
+    { date: '2026-06-12', weight: null, unit: 'lbs', calories: 2000 }, // ignored
+    { date: '2026-06-20', weight: 194, unit: 'lbs' },
+  ];
+  const sp = stats.sincePhaseStart(entries, '2026-06-10', 'lbs');
+  assert.ok(Math.abs(sp.delta - -4) < 1e-9);
+  // only one weigh-in since the phase start -> null
+  assert.equal(stats.sincePhaseStart(entries, '2026-06-15', 'lbs'), null);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

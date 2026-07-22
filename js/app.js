@@ -13,6 +13,7 @@ const els = {
   weightInput: $('weight-input'),
   weightUnitSuffix: $('weight-unit-suffix'),
   noteInput: $('note-input'),
+  caloriesInput: $('calories-input'),
   entryHint: $('entry-hint'),
   entryCancel: $('entry-cancel'),
   otherDayToggle: $('other-day-toggle'),
@@ -37,6 +38,14 @@ const els = {
   goalUnitSuffix: $('goal-unit-suffix'),
   goalDateInput: $('goal-date-input'),
   goalCancel: $('goal-cancel'),
+  phaseSummary: $('phase-summary'),
+  phaseNew: $('phase-new'),
+  phaseEdit: $('phase-edit'),
+  phaseClear: $('phase-clear'),
+  phaseForm: $('phase-form'),
+  phaseNameInput: $('phase-name-input'),
+  phaseDateInput: $('phase-date-input'),
+  phaseCancel: $('phase-cancel'),
   historyTitle: $('history-title'),
   historyList: $('history-list'),
   historyEmpty: $('history-empty'),
@@ -46,10 +55,13 @@ const els = {
 };
 
 const state = {
-  editingDate: null,      // date of the entry being edited via History, else null
-  editingPrefill: null,   // exact string prefilled on edit, to detect "unchanged"
-  editingOriginal: null,  // original entry being edited
-  goalFormOpen: false,    // single source of truth for goal-card button/form visibility
+  editingDate: null,      // date being edited via History (title/Cancel differ), else null
+  loadedDate: null,       // which date's values are currently in the form (null = reload needed)
+  original: null,         // existing stored entry for loadedDate (or null)
+  prefillWeightStr: '',   // weight string put in the field at prefill (detects "unchanged")
+  goalFormOpen: false,    // single source of truth for the goal card's form/buttons
+  phaseFormOpen: false,   // same for the phase card
+  phaseEditId: null,      // id of the phase being edited (null = starting a new one)
   renderedToday: null,    // catches the date rolling over while the app stays open
 };
 
@@ -81,7 +93,7 @@ function toast(msg) {
   els.toast.textContent = msg;
   els.toast.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => els.toast.classList.remove('show'), 2200);
+  toastTimer = setTimeout(() => els.toast.classList.remove('show'), 2400);
 }
 
 // Mutating storage can fail (quota full today; network errors after a cloud
@@ -100,10 +112,12 @@ function prefersReducedMotion() {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
+const formatCalories = (c) => c.toLocaleString();
+
 // Delta direction color: green when moving toward the goal, red when away,
 // neutral when there is no goal. The arrow glyph + wording carry the meaning
 // too — color is never the only channel.
-function deltaSpan(delta, goalDirection) {
+function deltaSpan(delta, goalDir) {
   // Judge direction from the ROUNDED value so the arrow/color never contradict
   // a displayed "0" (a -0.03 delta must not show a green ▼ next to "0").
   const rounded = round1(delta);
@@ -111,8 +125,8 @@ function deltaSpan(delta, goalDirection) {
   const arrow = document.createElement('span');
   arrow.className = 'delta-arrow';
   arrow.textContent = rounded > 0 ? '▲' : rounded < 0 ? '▼' : '';
-  if (goalDirection !== 0 && rounded !== 0) {
-    arrow.classList.add(Math.sign(rounded) === goalDirection ? 'delta-good' : 'delta-bad');
+  if (goalDir !== 0 && rounded !== 0) {
+    arrow.classList.add(Math.sign(rounded) === goalDir ? 'delta-good' : 'delta-bad');
   }
   span.append(arrow, document.createTextNode(formatSigned(delta)));
   return span;
@@ -125,25 +139,31 @@ function goalDirection(entries, goal, unit) {
   return dist.diff > 0 ? -1 : 1;
 }
 
+function currentPhase(periods) {
+  return periods.length ? periods[periods.length - 1] : null; // periods sorted ascending
+}
+
 // ---------- render ----------
 
 let refreshGen = 0;
 
 async function refresh() {
   const gen = ++refreshGen;
-  const [entries, goal, settings] = await Promise.all([
+  const [entries, goal, settings, periods] = await Promise.all([
     store.getAllEntries(),
     store.getGoal(),
     store.getSettings(),
+    store.getPeriods(),
   ]);
   if (gen !== refreshGen) return; // a newer refresh superseded this one — let it paint
   const unit = settings.unit;
   state.renderedToday = todayISO();
 
   renderEntryCard(entries, unit);
-  renderStats(entries, goal, unit);
+  renderStats(entries, goal, unit, periods);
   renderChartCard(entries, goal, unit);
-  renderGoalCard(entries, goal, unit);
+  renderGoalCard(goal, unit);
+  renderPhaseCard(periods);
   renderHistory(entries, unit);
   renderSettings(settings);
 }
@@ -155,57 +175,64 @@ function safeRefresh() {
   });
 }
 
+// The entry form represents ONE day's full state. Which day?
+function formTargetDate() {
+  if (state.editingDate) return state.editingDate;
+  if (!els.entryDateInput.hidden && els.entryDateInput.value) return els.entryDateInput.value;
+  return todayISO();
+}
+
+// Load a day's existing values into the fields. Called only when the target day
+// changes (never on an incidental refresh) so it can't clobber what's typed.
+function loadDay(date, entries, unit) {
+  const existing = entries.find((e) => e.date === date) || null;
+  state.original = existing;
+  state.loadedDate = date;
+  if (existing && existing.weight != null) {
+    state.prefillWeightStr = formatNumber(convert(existing.weight, existing.unit, unit));
+    els.weightInput.value = state.prefillWeightStr;
+  } else {
+    state.prefillWeightStr = '';
+    els.weightInput.value = '';
+  }
+  els.caloriesInput.value = existing && existing.calories != null ? String(existing.calories) : '';
+  els.noteInput.value = existing && existing.note ? existing.note : '';
+}
+
+function entryHintText(target, unit) {
+  if (state.editingDate) return 'Saving replaces this entry.';
+  const o = state.original;
+  const bits = [];
+  if (o && o.weight != null) bits.push(`${formatNumber(convert(o.weight, o.unit, unit))} ${unit}`);
+  if (o && o.calories != null) bits.push(`${formatCalories(o.calories)} cal`);
+  if (target === todayISO()) {
+    return o ? `Logged today: ${bits.join(', ')} — saving updates it.` : '';
+  }
+  return o ? `Logged ${fmtMedium(target)}: ${bits.join(', ')} — saving updates it.` : `Will save to ${fmtMedium(target)}.`;
+}
+
 function renderEntryCard(entries, unit) {
   const today = todayISO();
   els.weightUnitSuffix.textContent = unit;
 
+  const target = formTargetDate();
+  if (target !== state.loadedDate) loadDay(target, entries, unit);
+
   if (state.editingDate) {
     els.entryTitle.textContent = `Editing ${fmtMedium(state.editingDate)}`;
-    els.entryCancel.hidden = false;
-    els.otherDayToggle.hidden = true;
-    els.entryDateInput.hidden = true;
-    els.entryHint.textContent = 'Saving replaces this entry.';
-    return;
+  } else {
+    els.entryTitle.textContent = target === today ? fmtWeekday(today) : fmtMedium(target);
   }
 
-  els.entryTitle.textContent = fmtWeekday(today);
-  els.entryCancel.hidden = true;
-  els.otherDayToggle.hidden = !els.entryDateInput.hidden;
+  const backfilling = !state.editingDate && !els.entryDateInput.hidden;
+  els.entryCancel.hidden = !(state.editingDate || backfilling);
+  els.otherDayToggle.hidden = !!state.editingDate || backfilling;
   els.entryDateInput.max = today;
 
-  const todayEntry = entries.find((e) => e.date === today);
-  els.weightInput.placeholder = todayEntry
-    ? formatNumber(convert(todayEntry.weight, todayEntry.unit, unit))
-    : '0.0';
-
-  if (!els.entryDateInput.hidden) {
-    updateBackfillHint().catch(console.error); // hint tracks the picked date, not today
-  } else if (todayEntry) {
-    const shown = formatNumber(convert(todayEntry.weight, todayEntry.unit, unit));
-    els.entryHint.textContent = `Logged today: ${shown} ${unit} — saving replaces it.`;
-  } else {
-    els.entryHint.textContent = '';
-  }
+  els.entryHint.textContent = entryHintText(target, unit);
 }
 
-// When backfilling, say what the picked date already holds — mis-picking a
-// date must not silently destroy a measurement.
-async function updateBackfillHint() {
-  const date = els.entryDateInput.value;
-  if (els.entryDateInput.hidden || !date) {
-    els.entryHint.textContent = '';
-    return;
-  }
-  const [existing, settings] = await Promise.all([store.getEntry(date), store.getSettings()]);
-  if (existing) {
-    const shown = formatNumber(convert(existing.weight, existing.unit, settings.unit));
-    els.entryHint.textContent = `Logged ${fmtMedium(date)}: ${shown} ${settings.unit} — saving replaces it.`;
-  } else {
-    els.entryHint.textContent = `Will save to ${fmtMedium(date)}.`;
-  }
-}
-
-function renderStats(entries, goal, unit) {
+function renderStats(entries, goal, unit, periods) {
   const dir = goalDirection(entries, goal, unit);
   const trend = stats.computeTrend(entries, unit);
   const todayDay = stats.epochDay(todayISO());
@@ -309,11 +336,29 @@ function renderStats(entries, goal, unit) {
 
   const c7 = stats.changeOverDays(entries, unit, 7);
   const c30 = stats.changeOverDays(entries, unit, 30);
-  const start = stats.sinceStart(entries, unit);
   setTile(els.tiles.d7, c7, c7 ? `vs ${fmtShort(c7.fromDate)}` : undefined);
   setTile(els.tiles.d30, c30, c30 ? `vs ${fmtShort(c30.fromDate)}` : undefined);
-  setTile(els.tiles.start, start, start ? `since ${fmtShort(start.fromDate)}` : undefined);
 
+  // "Since start" tile — anchored to the current phase if one is set.
+  const phase = currentPhase(periods);
+  const startLabel = els.tiles.start.querySelector('.tile-label');
+  if (phase) {
+    startLabel.textContent = phase.name;
+    startLabel.title = phase.name; // full name on hover when the label is ellipsized
+    const sp = stats.sincePhaseStart(entries, phase.startDate, unit);
+    setTile(
+      els.tiles.start,
+      sp,
+      sp ? `since ${fmtShort(phase.startDate)}` : `since ${fmtShort(phase.startDate)} · need 2 weigh-ins`
+    );
+  } else {
+    startLabel.textContent = 'Since start';
+    startLabel.removeAttribute('title');
+    const start = stats.sinceStart(entries, unit);
+    setTile(els.tiles.start, start, start ? `since ${fmtShort(start.fromDate)}` : undefined);
+  }
+
+  // "To goal" tile
   const dist = stats.distanceToGoal(entries, goal, unit);
   const goalValue = els.tiles.goal.querySelector('.tile-value');
   const goalSub = els.tiles.goal.querySelector('.tile-sub');
@@ -332,13 +377,14 @@ function renderStats(entries, goal, unit) {
 
 function renderChartCard(entries, goal, unit) {
   els.chartTitle.textContent = `Weight (${unit})`;
-  const hasData = entries.length > 0;
+  const weightEntries = entries.filter((e) => e.weight != null && Number.isFinite(e.weight));
+  const hasData = weightEntries.length > 0;
   els.chartWrap.hidden = !hasData;
   els.chartEmpty.hidden = hasData;
-  if (hasData) renderChart(els.chartCanvas, entries, goal, unit);
+  if (hasData) renderChart(els.chartCanvas, weightEntries, goal, unit);
 }
 
-function renderGoalCard(entries, goal, unit) {
+function renderGoalCard(goal, unit) {
   els.goalUnitSuffix.textContent = unit;
   els.goalForm.hidden = !state.goalFormOpen;
   els.goalEdit.hidden = state.goalFormOpen;
@@ -352,6 +398,20 @@ function renderGoalCard(entries, goal, unit) {
   } else {
     els.goalSummary.textContent = 'No goal set.';
     els.goalEdit.textContent = 'Set goal';
+  }
+}
+
+function renderPhaseCard(periods) {
+  const phase = currentPhase(periods);
+  els.phaseForm.hidden = !state.phaseFormOpen;
+  els.phaseEdit.hidden = state.phaseFormOpen;
+  els.phaseNew.hidden = state.phaseFormOpen || !phase;
+  els.phaseClear.hidden = state.phaseFormOpen || !phase;
+  els.phaseEdit.textContent = phase ? 'Edit' : 'Start phase';
+  if (phase) {
+    els.phaseSummary.textContent = `${phase.name} — since ${fmtMedium(phase.startDate)}`;
+  } else {
+    els.phaseSummary.textContent = 'No phase set — “Since start” uses your first entry.';
   }
 }
 
@@ -370,13 +430,18 @@ function renderHistory(entries, unit) {
     dateEl.textContent = fmtMedium(entry.date);
     const weightEl = document.createElement('span');
     weightEl.className = 'history-weight';
-    weightEl.textContent = `${formatNumber(convert(entry.weight, entry.unit, unit))} ${unit}`;
+    weightEl.textContent =
+      entry.weight != null ? `${formatNumber(convert(entry.weight, entry.unit, unit))} ${unit}` : '—';
     main.append(dateEl, weightEl);
-    if (entry.note) {
-      const noteEl = document.createElement('span');
-      noteEl.className = 'history-note';
-      noteEl.textContent = entry.note; // untrusted text — textContent only
-      main.append(noteEl);
+
+    const metaParts = [];
+    if (entry.calories != null) metaParts.push(`${formatCalories(entry.calories)} cal`);
+    if (entry.note) metaParts.push(entry.note);
+    if (metaParts.length) {
+      const metaEl = document.createElement('span');
+      metaEl.className = 'history-note';
+      metaEl.textContent = metaParts.join(' · '); // note is untrusted — textContent only
+      main.append(metaEl);
     }
 
     const actions = document.createElement('div');
@@ -387,7 +452,7 @@ function renderHistory(entries, unit) {
     editBtn.setAttribute('aria-label', `Edit entry for ${fmtMedium(entry.date)}`);
     editBtn.innerHTML =
       '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>';
-    editBtn.addEventListener('click', () => startEdit(entry, unit));
+    editBtn.addEventListener('click', () => startEdit(entry));
     const delBtn = document.createElement('button');
     delBtn.type = 'button';
     delBtn.className = 'icon-btn';
@@ -398,7 +463,8 @@ function renderHistory(entries, unit) {
       if (!window.confirm(`Delete the entry for ${fmtMedium(entry.date)}?`)) return;
       const res = await withStore(() => store.deleteEntry(entry.date), 'Could not delete the entry.');
       if (!res.ok) return;
-      if (state.editingDate === entry.date) cancelEdit();
+      if (state.editingDate === entry.date) state.editingDate = null;
+      state.loadedDate = null; // the loaded day's data may be gone — reload the form
       toast('Entry deleted');
       await safeRefresh();
       els.historyTitle.focus(); // the focused button's row is gone — re-anchor keyboard users
@@ -418,12 +484,9 @@ function renderSettings(settings) {
 
 // ---------- entry form ----------
 
-function startEdit(entry, unit) {
+function startEdit(entry) {
   state.editingDate = entry.date;
-  state.editingOriginal = entry;
-  state.editingPrefill = formatNumber(convert(entry.weight, entry.unit, unit));
-  els.weightInput.value = state.editingPrefill;
-  els.noteInput.value = entry.note ?? '';
+  state.loadedDate = null; // force loadDay on the next render
   els.entryDateInput.hidden = true;
   els.entryDateInput.value = '';
   safeRefresh().then(() => {
@@ -432,60 +495,51 @@ function startEdit(entry, unit) {
   });
 }
 
-function cancelEdit() {
+// Return the form to "today", discarding any edit/backfill state.
+function resetForm() {
   state.editingDate = null;
-  state.editingOriginal = null;
-  state.editingPrefill = null;
-  els.weightInput.value = '';
-  els.noteInput.value = '';
+  els.entryDateInput.hidden = true;
+  els.entryDateInput.value = '';
+  state.loadedDate = null; // reload today's values on the next render
 }
 
 els.entryCancel.addEventListener('click', () => {
-  cancelEdit();
+  resetForm();
   safeRefresh();
 });
 
 els.otherDayToggle.addEventListener('click', () => {
   els.entryDateInput.hidden = false;
-  els.otherDayToggle.hidden = true;
   els.entryDateInput.max = todayISO();
   els.entryDateInput.value = todayISO();
   els.entryDateInput.focus();
-  updateBackfillHint().catch(console.error);
+  safeRefresh();
 });
 
 els.entryDateInput.addEventListener('change', () => {
-  updateBackfillHint().catch(console.error);
+  safeRefresh(); // target day changed -> renderEntryCard reloads that day's values
 });
 
 els.entryForm.addEventListener('submit', async (ev) => {
   ev.preventDefault();
+  const editing = Boolean(state.editingDate);
+  const backfilling = !editing && !els.entryDateInput.hidden;
 
-  // The date can roll over while the app stays open and visible (desktop past
-  // midnight). Don't stamp a day the UI never showed — re-render and re-ask.
-  if (!state.editingDate && state.renderedToday && state.renderedToday !== todayISO()) {
+  // The date can roll over while the app stays open (desktop past midnight).
+  // Don't stamp a day the UI never showed — re-render and re-ask.
+  if (!editing && !backfilling && state.renderedToday && state.renderedToday !== todayISO()) {
     await safeRefresh();
-    toast("It's a new day — check the date, then save again.");
+    toast("It's a new day — check the date, then log again.");
     return;
   }
 
-  const raw = els.weightInput.value.trim().replace(',', '.');
-  const weight = Number.parseFloat(raw);
-  if (!Number.isFinite(weight) || weight <= 0 || weight >= 2000) {
-    toast('Enter a weight between 0 and 2000.');
-    els.weightInput.focus();
-    return;
-  }
-
-  const settings = await store.getSettings();
-  const note = els.noteInput.value.trim();
   let date;
-  if (state.editingDate) {
+  if (editing) {
     date = state.editingDate;
-  } else if (!els.entryDateInput.hidden) {
+  } else if (backfilling) {
     date = els.entryDateInput.value;
     if (!date) {
-      toast('Pick a date, or cancel "Log a different day".');
+      toast('Pick a date, or cancel.');
       els.entryDateInput.focus();
       return;
     }
@@ -501,31 +555,80 @@ els.entryForm.addEventListener('submit', async (ev) => {
     date = todayISO();
   }
 
+  // Weight — optional (a day can be calories-only).
+  const wraw = els.weightInput.value.trim().replace(',', '.');
+  let weight = null;
+  if (wraw !== '') {
+    const w = Number.parseFloat(wraw);
+    if (!Number.isFinite(w) || w <= 0 || w >= 2000) {
+      toast('Enter a weight between 0 and 2000, or leave it blank.');
+      els.weightInput.focus();
+      return;
+    }
+    weight = w;
+  }
+
+  // Calories — optional, whole number.
+  const craw = els.caloriesInput.value.trim().replace(/[,\s]/g, '');
+  let calories = null;
+  if (craw !== '') {
+    if (!/^\d+$/.test(craw)) {
+      toast('Enter calories as a whole number (0–99999), or leave it blank.');
+      els.caloriesInput.focus();
+      return;
+    }
+    const c = Number.parseInt(craw, 10);
+    if (!Number.isFinite(c) || c >= 100000) {
+      toast('That calorie number looks too high — double-check it.');
+      els.caloriesInput.focus();
+      return;
+    }
+    calories = c;
+  }
+
+  if (weight == null && calories == null) {
+    toast('Enter a weight or calories to log.');
+    els.weightInput.focus();
+    return;
+  }
+
+  const settings = await store.getSettings();
+  const note = els.noteInput.value.trim();
+
   // Backfilling over an existing entry is destructive and easy to hit by
   // mis-picking a date — confirm it (today's overwrite is by design and the
   // card already says so).
-  if (!state.editingDate && date !== todayISO()) {
-    const existing = await store.getEntry(date);
+  if (!editing && date !== todayISO()) {
+    const existing =
+      state.original && state.original.date === date ? state.original : await store.getEntry(date);
     if (existing) {
-      const shown = formatNumber(convert(existing.weight, existing.unit, settings.unit));
-      if (!window.confirm(`Replace the ${fmtMedium(date)} entry (${shown} ${settings.unit})?`)) return;
+      const parts = [];
+      if (existing.weight != null) parts.push(`${formatNumber(convert(existing.weight, existing.unit, settings.unit))} ${settings.unit}`);
+      if (existing.calories != null) parts.push(`${formatCalories(existing.calories)} cal`);
+      if (!window.confirm(`Replace the ${fmtMedium(date)} entry (${parts.join(', ')})?`)) return;
     }
   }
 
-  // Editing with an unchanged number keeps the original raw weight + unit, so
-  // fixing a note never rewrites (and re-rounds) the stored measurement.
-  const unchanged =
-    state.editingOriginal && els.weightInput.value.trim() === state.editingPrefill;
-  const entry = unchanged
-    ? { date, weight: state.editingOriginal.weight, unit: state.editingOriginal.unit, note }
-    : { date, weight, unit: settings.unit, note };
+  // If the weight field is unchanged from what was prefilled, keep the ORIGINAL
+  // raw weight + unit — so re-logging (e.g. just to add calories) never
+  // re-rounds or unit-shifts the stored measurement.
+  let outWeight = weight;
+  let outUnit = settings.unit;
+  if (
+    weight != null &&
+    state.original &&
+    state.original.weight != null &&
+    els.weightInput.value.trim() === state.prefillWeightStr
+  ) {
+    outWeight = state.original.weight;
+    outUnit = state.original.unit;
+  }
 
+  const entry = { date, weight: outWeight, unit: outUnit, note, calories };
   const res = await withStore(() => store.saveEntry(entry), 'Could not save — storage failed.');
   if (!res.ok) return;
-  const wasEditing = Boolean(state.editingDate);
-  cancelEdit();
-  els.entryDateInput.hidden = true;
-  toast(wasEditing ? 'Entry updated' : 'Saved');
+  toast(editing ? 'Updated' : 'Logged');
+  resetForm();
   safeRefresh();
 });
 
@@ -585,6 +688,69 @@ els.goalClear.addEventListener('click', async () => {
   safeRefresh();
 });
 
+// ---------- phase form ----------
+
+function openPhaseForm(phase) {
+  state.phaseFormOpen = true;
+  state.phaseEditId = phase ? phase.id : null;
+  els.phaseNameInput.value = phase ? phase.name : '';
+  els.phaseDateInput.value = phase ? phase.startDate : todayISO();
+  els.phaseDateInput.max = todayISO();
+  safeRefresh().then(() => els.phaseNameInput.focus());
+}
+
+els.phaseEdit.addEventListener('click', async () => {
+  const periods = await store.getPeriods();
+  openPhaseForm(currentPhase(periods)); // edit current, or start the first one
+});
+
+els.phaseNew.addEventListener('click', () => {
+  openPhaseForm(null); // start a brand-new phase
+});
+
+els.phaseCancel.addEventListener('click', () => {
+  state.phaseFormOpen = false;
+  safeRefresh();
+});
+
+els.phaseForm.addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const name = els.phaseNameInput.value.trim();
+  if (!name) {
+    toast('Give the phase a name.');
+    els.phaseNameInput.focus();
+    return;
+  }
+  const startDate = els.phaseDateInput.value || todayISO();
+  if (startDate > todayISO()) {
+    toast('A phase can’t start in the future.');
+    return;
+  }
+  if (startDate < '1900-01-01') {
+    toast('That start date looks wrong — check the year.');
+    return;
+  }
+  const res = await withStore(
+    () => store.savePeriod({ id: state.phaseEditId ?? undefined, name, startDate }),
+    'Could not save the phase — storage failed.'
+  );
+  if (!res.ok) return;
+  state.phaseFormOpen = false;
+  toast('Phase saved');
+  safeRefresh();
+});
+
+els.phaseClear.addEventListener('click', async () => {
+  if (!window.confirm('Clear the current phase? “Since start” will go back to your first entry.')) return;
+  const periods = await store.getPeriods();
+  const phase = currentPhase(periods);
+  if (!phase) return;
+  const res = await withStore(() => store.deletePeriod(phase.id), 'Could not clear the phase.');
+  if (!res.ok) return;
+  toast('Phase cleared');
+  safeRefresh();
+});
+
 // ---------- settings ----------
 
 for (const radio of els.unitRadios()) {
@@ -592,8 +758,8 @@ for (const radio of els.unitRadios()) {
     if (!radio.checked) return;
     const res = await withStore(() => store.saveSettings({ unit: radio.value }), 'Could not save settings.');
     if (!res.ok) return;
-    if (state.editingDate) cancelEdit();  // prefilled number is in the old unit
-    state.goalFormOpen = false;           // same for the goal form's prefill
+    state.loadedDate = null;    // re-prefill the entry form in the new unit
+    state.goalFormOpen = false; // goal form's prefill is in the old unit
     safeRefresh();
   });
 }
