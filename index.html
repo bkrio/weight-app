@@ -112,6 +112,11 @@
 
     <section class="card" aria-labelledby="chart-title">
       <h2 id="chart-title" class="card-title">Weight (lbs)</h2>
+      <div class="chart-controls">
+        <div id="chart-range" class="pill-tabs" role="tablist" aria-label="Chart time range"></div>
+        <label class="visually-hidden" for="chart-phase">View a phase</label>
+        <select id="chart-phase" class="chart-phase-select" hidden></select>
+      </div>
       <div id="chart-wrap" class="chart-wrap" hidden>
         <canvas id="chart-canvas" role="img"
                 aria-label="Line chart of weight over time. All values are listed in the History section below."></canvas>
@@ -170,7 +175,7 @@
 
     <section class="card" aria-labelledby="history-title">
       <h2 id="history-title" class="card-title" tabindex="-1">History</h2>
-      <div id="history-tabs" class="history-tabs" role="tablist" aria-label="Filter history by phase" hidden></div>
+      <div id="history-tabs" class="pill-tabs" role="tablist" aria-label="Filter history by phase" hidden></div>
       <ul id="history-list" class="history-list"></ul>
       <p id="history-empty" class="empty">No entries yet.</p>
     </section>

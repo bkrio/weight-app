@@ -34,6 +34,8 @@ const els = {
   chartCanvas: $('chart-canvas'),
   chartWrap: $('chart-wrap'),
   chartEmpty: $('chart-empty'),
+  chartRange: $('chart-range'),
+  chartPhase: $('chart-phase'),
   goalSummary: $('goal-summary'),
   goalEdit: $('goal-edit'),
   goalClear: $('goal-clear'),
@@ -71,6 +73,7 @@ const state = {
   phaseFormOpen: false,   // same for the phase card
   phaseEditId: null,      // id of the phase being edited (null = starting a new one)
   historyFilter: 'all',   // 'all' or a phase id — filters the History list
+  chartRange: null,       // '1w'|'1m'|'3m'|'1y'|'all'|'phase:<id>' (null until loaded from settings)
   renderedToday: null,    // catches the date rolling over while the app stays open
 };
 
@@ -173,11 +176,13 @@ async function refresh() {
   ]);
   if (gen !== refreshGen) return; // a newer refresh superseded this one — let it paint
   const unit = settings.unit;
+  if (state.chartRange === null) state.chartRange = settings.chartRange; // load persisted range once
   state.renderedToday = todayISO();
 
   renderEntryCard(entries, unit);
   renderStats(entries, goal, unit, periods);
-  renderChartCard(entries, goal, unit);
+  renderChartCard(entries, goal, unit, periods);
+  renderChartRange(periods);
   renderGoalCard(goal, unit);
   renderPhaseCard(periods);
   renderHistory(entries, unit, periods);
@@ -419,14 +424,85 @@ function renderStats(entries, goal, unit, periods) {
   }
 }
 
-function renderChartCard(entries, goal, unit) {
+const HALF_DAY_MS = 12 * 60 * 60 * 1000;
+const RANGE_PILLS = [
+  { value: '1w', label: '1W' },
+  { value: '1m', label: '1M' },
+  { value: '3m', label: '3M' },
+  { value: '1y', label: '1Y' },
+  { value: 'all', label: 'All' },
+];
+
+function saveRange(range) {
+  store.saveSettings({ chartRange: range }).catch((err) => console.error(err));
+}
+
+function renderChartCard(entries, goal, unit, periods) {
   els.chartTitle.textContent = `Weight (${unit})`;
   // Plot anything with a weight or calories; the chart overlays both lines.
   const plottable = entries.filter((e) => (e.weight != null && Number.isFinite(e.weight)) || e.calories != null);
   const hasData = plottable.length > 0;
   els.chartWrap.hidden = !hasData;
   els.chartEmpty.hidden = hasData;
-  if (hasData) renderChart(els.chartCanvas, plottable, goal, unit);
+  if (!hasData) return;
+
+  // Resolve the selected range to a window. A deleted phase yields null bounds —
+  // fall back to the default range and persist the correction.
+  let bounds = stats.chartRangeBounds(plottable, state.chartRange, periods);
+  if (bounds === null && typeof state.chartRange === 'string' && state.chartRange.startsWith('phase:')) {
+    state.chartRange = '1w';
+    saveRange(state.chartRange);
+    bounds = stats.chartRangeBounds(plottable, state.chartRange, periods);
+  }
+  const range = bounds
+    ? {
+        startMs: parseISO(bounds.start).getTime() - HALF_DAY_MS, // ½-day pad so edge points aren't clipped
+        endMs: parseISO(bounds.end).getTime() + HALF_DAY_MS,
+      }
+    : null;
+  renderChart(els.chartCanvas, plottable, goal, unit, range);
+}
+
+function renderChartRange(periods) {
+  const onPhase = typeof state.chartRange === 'string' && state.chartRange.startsWith('phase:');
+
+  els.chartRange.textContent = '';
+  for (const p of RANGE_PILLS) {
+    const active = !onPhase && state.chartRange === p.value;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'pill' + (active ? ' is-active' : '');
+    btn.setAttribute('role', 'tab');
+    btn.setAttribute('aria-selected', String(active));
+    btn.textContent = p.label;
+    btn.addEventListener('click', () => {
+      state.chartRange = p.value;
+      saveRange(p.value);
+      safeRefresh();
+    });
+    els.chartRange.append(btn);
+  }
+
+  // Phase dropdown — only when phases exist; lists all phases, newest first.
+  els.chartPhase.textContent = '';
+  if (!periods.length) {
+    els.chartPhase.hidden = true;
+    return;
+  }
+  els.chartPhase.hidden = false;
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = 'Phase…';
+  placeholder.disabled = true;
+  placeholder.selected = !onPhase;
+  els.chartPhase.append(placeholder);
+  for (const ph of [...periods].reverse()) {
+    const opt = document.createElement('option');
+    opt.value = 'phase:' + ph.id;
+    opt.textContent = ph.name; // user text — textContent only
+    if (state.chartRange === opt.value) opt.selected = true;
+    els.chartPhase.append(opt);
+  }
 }
 
 function renderGoalCard(goal, unit) {
@@ -484,7 +560,7 @@ function renderHistoryTabs(periods) {
   for (const t of tabs) {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'history-tab' + (state.historyFilter === t.id ? ' is-active' : '');
+    btn.className = 'pill' + (state.historyFilter === t.id ? ' is-active' : '');
     btn.setAttribute('role', 'tab');
     btn.setAttribute('aria-selected', String(state.historyFilter === t.id));
     btn.textContent = t.name; // phase name is user text — textContent only
@@ -846,6 +922,15 @@ for (const radio of els.unitRadios()) {
     safeRefresh();
   });
 }
+
+// Chart phase dropdown (persistent element — listener attached once).
+els.chartPhase.addEventListener('change', () => {
+  const v = els.chartPhase.value;
+  if (!v) return;
+  state.chartRange = v;
+  saveRange(v);
+  safeRefresh();
+});
 
 els.exportBtn.addEventListener('click', async () => {
   const res = await withStore(() => store.exportCSV(), 'Could not export CSV.');

@@ -94,11 +94,16 @@ await test('goal save/get/clear', async () => {
   assert.equal(await store.saveGoal(null), null);
   assert.equal(await store.getGoal(), null);
 });
-await test('settings default lbs, then persist', async () => {
-  assert.deepEqual(await store.getSettings(), { unit: 'lbs' });
+await test('settings default + merge (unit / chartRange independent)', async () => {
+  backing.delete('weight-tracker:settings');
+  assert.deepEqual(await store.getSettings(), { unit: 'lbs', chartRange: '1w' });
   await store.saveSettings({ unit: 'kg' });
-  assert.deepEqual(await store.getSettings(), { unit: 'kg' });
+  assert.deepEqual(await store.getSettings(), { unit: 'kg', chartRange: '1w' }); // range kept
+  await store.saveSettings({ chartRange: '3m' });
+  assert.deepEqual(await store.getSettings(), { unit: 'kg', chartRange: '3m' }); // unit kept
   await store.saveSettings({ unit: 'lbs' });
+  assert.deepEqual(await store.getSettings(), { unit: 'lbs', chartRange: '3m' });
+  await assert.rejects(store.saveSettings({ chartRange: 'nonsense' }), TypeError);
 });
 await test('corrupt storage degrades to fallback', async () => {
   backing.set('weight-tracker:goal', '{not json');
@@ -503,6 +508,39 @@ await test('markBackedUp / getLastBackup', async () => {
   // meta survives other writes
   await store.saveSettings({ unit: 'kg' });
   assert.equal(await store.getLastBackup(), '2026-07-21');
+});
+
+// ---------------- chartRangeBounds ----------------
+await test('chartRangeBounds: all / empty -> null', () => {
+  assert.equal(stats.chartRangeBounds([{ date: '2026-07-01', weight: 180, unit: 'lbs' }], 'all', []), null);
+  assert.equal(stats.chartRangeBounds([], '1m', []), null);
+});
+await test('chartRangeBounds: durations anchor to the latest entry, inclusive', () => {
+  const entries = [
+    { date: '2026-06-01', weight: 200, unit: 'lbs' },
+    { date: '2026-07-20', weight: 190, unit: 'lbs' },
+  ];
+  assert.deepEqual(stats.chartRangeBounds(entries, '1w', []), { start: '2026-07-14', end: '2026-07-20' });
+  const mo = stats.chartRangeBounds(entries, '1m', []);
+  assert.equal(mo.end, '2026-07-20');
+  assert.equal(mo.start, stats.dayToISO(stats.epochDay('2026-07-20') - 29));
+  const yr = stats.chartRangeBounds(entries, '1y', []);
+  assert.equal(yr.start, stats.dayToISO(stats.epochDay('2026-07-20') - 364));
+});
+await test('chartRangeBounds: phase span = [start, next-1]; current -> latest entry', () => {
+  const entries = [
+    { date: '2026-06-05', weight: 200, unit: 'lbs' },
+    { date: '2026-07-20', weight: 190, unit: 'lbs' },
+  ];
+  const periods = [
+    { id: 'a', name: 'Bulk', startDate: '2026-06-01' },
+    { id: 'b', name: 'Cut', startDate: '2026-07-01' },
+  ];
+  assert.deepEqual(stats.chartRangeBounds(entries, 'phase:a', periods), { start: '2026-06-01', end: '2026-06-30' });
+  assert.deepEqual(stats.chartRangeBounds(entries, 'phase:b', periods), { start: '2026-07-01', end: '2026-07-20' });
+});
+await test('chartRangeBounds: unknown/deleted phase -> null (falls back to all)', () => {
+  assert.equal(stats.chartRangeBounds([{ date: '2026-07-01', weight: 180, unit: 'lbs' }], 'phase:gone', []), null);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

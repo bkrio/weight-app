@@ -120,7 +120,7 @@ const axisTitlesPlugin = {
 
 // (Re)draws the chart from scratch — data volume is tiny, and rebuilding avoids
 // stale-option bugs on unit/theme/goal changes.
-export function renderChart(canvas, entries, goal, unit) {
+export function renderChart(canvas, entries, goal, unit, range = null) {
   const tk = tokens();
 
   // One sorted list of every date so both series align by index — that lets the
@@ -146,17 +146,26 @@ export function renderChart(canvas, entries, goal, unit) {
 
   const goalY = goal ? round1(convert(goal.targetWeight, goal.unit, unit)) : null;
 
-  const wYs = weightVals.concat(goalY != null ? [goalY] : []);
+  // Scale the y-axes to what's VISIBLE in the selected window, so a short range
+  // isn't flattened by the full history's spread. Fall back to all points when
+  // the window has none (keeps a sensible axis rather than collapsing).
+  const inRange = (p) => !range || (p.x >= range.startMs && p.x <= range.endMs);
+  const wWin = weightData.filter((p) => p.y != null && inRange(p)).map((p) => p.y);
+  const cWin = calData.filter((p) => p.y != null && inRange(p)).map((p) => p.y);
+  const wSource = wWin.length ? wWin : weightVals;
+  const cSource = cWin.length ? cWin : calVals;
+
+  const wYs = wSource.concat(goalY != null ? [goalY] : []);
   const wMin = wYs.length ? Math.min(...wYs) : 0;
   const wMax = wYs.length ? Math.max(...wYs) : 1;
   const wPad = Math.max(2, (wMax - wMin) * 0.15);
 
-  const cMin = hasCal ? Math.min(...calVals) : 0;
-  const cMax = hasCal ? Math.max(...calVals) : 1;
+  const cMin = cSource.length ? Math.min(...cSource) : 0;
+  const cMax = cSource.length ? Math.max(...cSource) : 1;
   const cPad = Math.max(50, (cMax - cMin) * 0.15);
 
-  const n = sorted.length;
-  const pointRadius = n > 150 ? 2 : n > 60 ? 3 : 4;
+  const visible = wWin.length + cWin.length;
+  const pointRadius = visible > 150 ? 2 : visible > 60 ? 3 : 4;
 
   const lineDataset = (extra) => ({
     borderWidth: 2,
@@ -214,6 +223,7 @@ export function renderChart(canvas, entries, goal, unit) {
         maxTicksLimit: 6,
         padding: 6,
       },
+      ...(range ? { min: range.startMs, max: range.endMs } : {}),
     },
     y: {
       position: 'left',

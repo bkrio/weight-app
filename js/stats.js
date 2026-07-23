@@ -187,6 +187,44 @@ export function sincePhaseStart(entries, startDate, unit) {
   };
 }
 
+export const RANGE_DAYS = { '1w': 7, '1m': 30, '3m': 90, '1y': 365 };
+
+// Resolve a chart range selection to inclusive date bounds, or null for "show
+// everything" (auto-fit). Pure — anchored to the data, no reference to "now".
+//   'all'            -> null
+//   '1w'|'1m'|'3m'|'1y' -> a window of that many days ENDING at the latest entry
+//                          (so a window is never empty after a logging gap)
+//   'phase:<id>'     -> that phase's span: [startDate, day before the next
+//                          phase's start]; the current (latest) phase ends at the
+//                          latest entry. Unknown/deleted id -> null (fall back to all).
+export function chartRangeBounds(entries, range, periods = []) {
+  if (!range || range === 'all') return null;
+
+  const dates = entries.map((e) => e.date).filter((d) => typeof d === 'string').sort();
+  const latest = dates.length ? dates[dates.length - 1] : null;
+
+  if (range.startsWith('phase:')) {
+    const id = range.slice('phase:'.length);
+    const sorted = [...periods].sort((a, b) =>
+      a.startDate < b.startDate ? -1 : a.startDate > b.startDate ? 1 : 0
+    );
+    const idx = sorted.findIndex((p) => p.id === id);
+    if (idx === -1) return null;
+    const start = sorted[idx].startDate;
+    const end =
+      idx + 1 < sorted.length
+        ? dayToISO(epochDay(sorted[idx + 1].startDate) - 1) // day before the next phase
+        : latest && latest >= start
+        ? latest // current phase runs to the most recent entry
+        : start;
+    return { start, end };
+  }
+
+  const days = RANGE_DAYS[range];
+  if (!days || !latest) return null;
+  return { start: dayToISO(epochDay(latest) - (days - 1)), end: latest };
+}
+
 // Signed distance to goal: diff = current - target (positive = above target).
 export function distanceToGoal(entries, goal, unit) {
   if (!goal) return null;

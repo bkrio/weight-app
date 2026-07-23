@@ -16,8 +16,9 @@
 //   saveGoal(goal)      goal: { targetWeight:number>0, unit:'lbs'|'kg', targetDate?:'YYYY-MM-DD'|null } | null
 //                       saveGoal(null) clears the goal.
 //   getGoal()           -> goal | null
-//   saveSettings(s)     s: { unit:'lbs'|'kg' }
-//   getSettings()       -> settings (defaults to { unit:'lbs' } if never set)
+//   saveSettings(s)     s: partial { unit?:'lbs'|'kg', chartRange?:string } — merged
+//                       into the stored settings (unspecified fields are kept)
+//   getSettings()       -> { unit:'lbs'|'kg', chartRange:string } with defaults
 //   getPeriods()        -> period[] sorted by startDate ascending
 //                          period: { id:string, name:string, startDate:'YYYY-MM-DD' }
 //   savePeriod(period)  upserts by id (generates an id when absent) -> period
@@ -43,7 +44,8 @@ const KEYS = {
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const VALID_UNITS = ['lbs', 'kg'];
-const DEFAULT_SETTINGS = { unit: 'lbs' };
+const CHART_RANGE_RE = /^(1w|1m|3m|1y|all|phase:.+)$/; // duration preset or a phase id
+const DEFAULT_SETTINGS = { unit: 'lbs', chartRange: '1w' };
 const MAX_CALORIES = 100000; // sanity ceiling; anything at/above is a typo
 
 function readJSON(key, fallback) {
@@ -209,16 +211,36 @@ export async function getGoal() {
 
 // ---------- settings ----------
 
-export async function saveSettings(settings) {
-  assertUnit(settings?.unit);
-  const clean = { unit: settings.unit };
-  writeJSON(KEYS.settings, clean);
-  return { ...clean };
+function readSettings() {
+  const s = readJSON(KEYS.settings, null);
+  const unit = s && VALID_UNITS.includes(s.unit) ? s.unit : DEFAULT_SETTINGS.unit;
+  const chartRange =
+    s && typeof s.chartRange === 'string' && CHART_RANGE_RE.test(s.chartRange)
+      ? s.chartRange
+      : DEFAULT_SETTINGS.chartRange;
+  return { unit, chartRange };
+}
+
+// Merges a partial into the stored settings so saving one field never clobbers
+// the others (e.g. changing units keeps the chart range and vice-versa).
+export async function saveSettings(partial) {
+  const next = readSettings();
+  if (partial && partial.unit !== undefined) {
+    assertUnit(partial.unit);
+    next.unit = partial.unit;
+  }
+  if (partial && partial.chartRange !== undefined) {
+    if (typeof partial.chartRange !== 'string' || !CHART_RANGE_RE.test(partial.chartRange)) {
+      throw new TypeError(`chartRange must match ${CHART_RANGE_RE}, got: ${JSON.stringify(partial.chartRange)}`);
+    }
+    next.chartRange = partial.chartRange;
+  }
+  writeJSON(KEYS.settings, next);
+  return { ...next };
 }
 
 export async function getSettings() {
-  const s = readJSON(KEYS.settings, null);
-  return s && VALID_UNITS.includes(s.unit) ? { unit: s.unit } : { ...DEFAULT_SETTINGS };
+  return readSettings();
 }
 
 // ---------- phases / periods ----------

@@ -472,7 +472,8 @@ input[type="date"] {
 
 /* ---------- history ---------- */
 
-.history-tabs {
+/* Shared pill tab row — used by the History phase filter and the chart range. */
+.pill-tabs {
   display: flex;
   gap: 6px;
   overflow-x: auto;
@@ -481,7 +482,7 @@ input[type="date"] {
   -webkit-overflow-scrolling: touch;
 }
 
-.history-tab {
+.pill {
   flex-shrink: 0;
   background: none;
   border: 1px solid var(--baseline);
@@ -495,10 +496,39 @@ input[type="date"] {
   min-height: 34px;
 }
 
-.history-tab.is-active {
+.pill.is-active {
   background: var(--accent-fill);
   color: #ffffff;
   border-color: var(--accent-fill);
+}
+
+/* Chart range controls: pill row + optional phase dropdown */
+.chart-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.chart-controls .pill-tabs {
+  margin-bottom: 0;
+  flex: 1;
+  min-width: 0;
+}
+
+.chart-phase-select {
+  flex-shrink: 0;
+  max-width: 45%;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-secondary);
+  background: transparent;
+  border: 1px solid var(--baseline);
+  border-radius: 999px;
+  padding: 6px 10px;
+  min-height: 34px;
+  cursor: pointer;
 }
 
 .history-list {
