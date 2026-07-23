@@ -64,10 +64,19 @@ Data notes:
 - Weight is stored as the raw number **and the unit it was entered in**; toggling
   lbs/kg only converts at display time and never rewrites history.
 - Everything lives in this browser's storage on this device. **Export CSV**
-  (Settings) is your backup — use it now and then. On iPhone/iPad the export
-  opens the native share sheet (choose **Save to Files** or send it on);
-  on desktop and Android it downloads a `.csv`. Backing up matters more on
-  iOS: if you don't open the app for ~7 days, Safari may clear its stored data.
+  (Settings) writes a backup; **Restore** reads a CSV back in (entries are
+  upserted by date; goal and phases are quick to re-set). On iPhone/iPad the
+  export opens the native share sheet (**Save to Files** or send it on); on
+  desktop/Android it downloads a `.csv`. Settings shows when you last backed up
+  and nudges you (in red) if it's been a while or you've never backed up.
+- **iOS storage note:** an installed **home-screen** web app is exempt from
+  Safari's 7-day "clear unused site data" rule (that rule targets regular tab
+  browsing), so data should survive long gaps — use it from the home-screen
+  icon. It's not an absolute guarantee (Apple's behavior varies; a device can
+  also evict under severe storage pressure), so the app also requests
+  *persistent* storage (`navigator.storage.persist()` — reliably granted on
+  Chrome/Android, best-effort on iOS) and the CSV export/restore is your
+  belt-and-suspenders backup.
 
 ## Run locally (test on your computer)
 

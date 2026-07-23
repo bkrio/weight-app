@@ -433,5 +433,77 @@ await test('sincePhaseStart ignores calorie-only days and needs 2 weigh-ins', ()
   assert.equal(stats.sincePhaseStart(entries, '2026-06-15', 'lbs'), null);
 });
 
+// ---------------- CSV import / restore ----------------
+await test('exportCSV -> importCSV round-trips entries', async () => {
+  backing.clear();
+  await store.saveEntry({ date: '2026-07-01', weight: 182.4, unit: 'lbs', note: 'salty, "big" dinner', calories: 2400 });
+  await store.saveEntry({ date: '2026-07-02', unit: 'kg', calories: 2000 });       // weight-less
+  await store.saveEntry({ date: '2026-07-03', weight: 179, unit: 'lbs', note: '=danger' }); // formula-guard note
+  const csv = await store.exportCSV();
+  const before = await store.getAllEntries();
+  backing.clear();
+  const summary = await store.importCSV(csv);
+  assert.equal(summary.imported, 3);
+  const after = await store.getAllEntries();
+  assert.equal(after.length, 3);
+  // dates + weights + calories + unit survive; note trims the export's formula-guard space
+  assert.deepEqual(after.map((e) => e.date), before.map((e) => e.date));
+  assert.equal(after.find((e) => e.date === '2026-07-01').calories, 2400);
+  assert.equal(after.find((e) => e.date === '2026-07-02').weight, null);
+  assert.equal(after.find((e) => e.date === '2026-07-02').unit, 'kg');
+  assert.equal(after.find((e) => e.date === '2026-07-03').note, '=danger');
+  assert.equal(after.find((e) => e.date === '2026-07-01').note, 'salty, "big" dinner');
+});
+await test('importCSV dryRun validates without writing', async () => {
+  backing.clear();
+  const csv = 'date,weight,unit,note,calories\r\n2026-07-01,180,lbs,,1850\r\n';
+  const preview = await store.importCSV(csv, { dryRun: true });
+  assert.equal(preview.imported, 1);
+  assert.equal((await store.getAllEntries()).length, 0); // nothing written
+});
+await test('importCSV counts invalid rows and needs a date column', async () => {
+  backing.clear();
+  const csv = [
+    'date,weight,unit,note,calories',
+    '2026-07-01,180,lbs,,1850',   // ok
+    'not-a-date,170,lbs,,',       // bad date -> invalid
+    '2026-07-02,,lbs,,',          // no weight & no calories -> invalid
+    '2026-07-03,,lbs,,2000',      // calorie-only -> ok
+  ].join('\n');
+  const s = await store.importCSV(csv);
+  assert.equal(s.imported, 2);
+  assert.equal(s.invalid, 2);
+  await assert.rejects(store.importCSV('name,value\r\nx,1\r\n'), /date/);
+});
+await test('importCSV overwrite vs skip on existing dates', async () => {
+  backing.clear();
+  await store.saveEntry({ date: '2026-07-01', weight: 180, unit: 'lbs' });
+  const csv = 'date,weight,unit,note,calories\r\n2026-07-01,175,lbs,,\r\n';
+  const skip = await store.importCSV(csv, { overwrite: false });
+  assert.equal(skip.skipped, 1);
+  assert.equal((await store.getEntry('2026-07-01')).weight, 180); // unchanged
+  await store.importCSV(csv, { overwrite: true });
+  assert.equal((await store.getEntry('2026-07-01')).weight, 175); // replaced
+});
+await test('importCSV tolerates column reorder and extra columns', async () => {
+  backing.clear();
+  const csv = 'calories,note,date,weight,unit,extra\r\n1850,hi,2026-07-01,180,lbs,ignored\r\n';
+  const s = await store.importCSV(csv);
+  assert.equal(s.imported, 1);
+  const e = await store.getEntry('2026-07-01');
+  assert.equal(e.weight, 180);
+  assert.equal(e.calories, 1850);
+  assert.equal(e.note, 'hi');
+});
+await test('markBackedUp / getLastBackup', async () => {
+  backing.clear();
+  assert.equal(await store.getLastBackup(), null);
+  await store.markBackedUp('2026-07-21');
+  assert.equal(await store.getLastBackup(), '2026-07-21');
+  // meta survives other writes
+  await store.saveSettings({ unit: 'kg' });
+  assert.equal(await store.getLastBackup(), '2026-07-21');
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

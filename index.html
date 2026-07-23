@@ -179,10 +179,14 @@
         </div>
       </div>
       <div class="settings-row">
-        <span class="field-label">Data</span>
-        <button id="export-btn" type="button" class="secondary-btn">Export CSV</button>
+        <span class="field-label">Backup</span>
+        <div class="settings-actions">
+          <button id="export-btn" type="button" class="secondary-btn">Export CSV</button>
+          <button id="import-btn" type="button" class="secondary-btn">Restore</button>
+        </div>
       </div>
-      <p class="hint">All data stays on this device (browser storage). Export a CSV backup now and then.</p>
+      <input id="import-file" type="file" accept=".csv,text/csv" hidden>
+      <p id="backup-status" class="hint">All data stays on this device. Export a CSV backup now and then — Restore reloads one if it's ever lost.</p>
     </section>
 
     <footer class="app-footer">

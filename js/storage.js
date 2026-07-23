@@ -23,6 +23,12 @@
 //   savePeriod(period)  upserts by id (generates an id when absent) -> period
 //   deletePeriod(id)    -> true if a period existed and was removed
 //   exportCSV()         -> CSV string: date,weight,unit,note,calories (RFC 4180 quoting)
+//   importCSV(text,opts)-> upsert entries from a CSV string (the export format).
+//                          opts: { overwrite=true, dryRun=false }. Returns
+//                          { imported, skipped, invalid, total }. dryRun validates
+//                          without writing (for a preview/confirm).
+//   markBackedUp(iso)   record that a backup happened on `iso`
+//   getLastBackup()     -> 'YYYY-MM-DD' | null
 //
 // No other file may read or write localStorage/IndexedDB.
 
@@ -32,6 +38,7 @@ const KEYS = {
   goal: `${NS}:goal`,
   settings: `${NS}:settings`,
   periods: `${NS}:periods`,
+  meta: `${NS}:meta`,
 };
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -280,4 +287,117 @@ export async function exportCSV() {
     [e.date, e.weight ?? '', e.unit, e.note, e.calories ?? ''].map(escape).join(',')
   );
   return ['date,weight,unit,note,calories', ...rows].join('\r\n') + '\r\n';
+}
+
+// RFC 4180-ish parser: handles quoted fields, "" escapes, commas/newlines
+// inside quotes, and LF or CRLF line endings. Returns an array of string arrays.
+function parseCSV(text) {
+  const s = String(text).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const rows = [];
+  let row = [];
+  let field = '';
+  let inQuotes = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (s[i + 1] === '"') { field += '"'; i++; } else { inQuotes = false; }
+      } else {
+        field += ch;
+      }
+    } else if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === ',') {
+      row.push(field);
+      field = '';
+    } else if (ch === '\n') {
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = '';
+    } else {
+      field += ch;
+    }
+  }
+  if (field !== '' || row.length) {
+    row.push(field);
+    rows.push(row);
+  }
+  return rows;
+}
+
+export async function importCSV(text, { overwrite = true, dryRun = false } = {}) {
+  const rows = parseCSV(text);
+  const summary = { imported: 0, skipped: 0, invalid: 0, total: 0 };
+  if (rows.length < 2) return summary; // header only / empty
+
+  const header = rows[0].map((h) => h.trim().toLowerCase());
+  const col = {
+    date: header.indexOf('date'),
+    weight: header.indexOf('weight'),
+    unit: header.indexOf('unit'),
+    note: header.indexOf('note'),
+    calories: header.indexOf('calories'),
+  };
+  if (col.date === -1) throw new Error("That CSV has no 'date' column — is it a weight-tracker export?");
+
+  const entries = readEntriesMap();
+  const cell = (row, i) => (i !== -1 && i < row.length ? row[i] : '');
+
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r];
+    if (row.length === 1 && row[0].trim() === '') continue; // blank line
+    summary.total++;
+
+    const date = cell(row, col.date).trim();
+    if (!DATE_RE.test(date)) { summary.invalid++; continue; }
+
+    const rawW = cell(row, col.weight).trim();
+    const rawC = cell(row, col.calories).replace(/[,\s]/g, '');
+    const unitRaw = cell(row, col.unit).trim().toLowerCase();
+    const note = cell(row, col.note).trim();
+
+    let weight = null;
+    if (rawW !== '') {
+      const w = Number.parseFloat(rawW);
+      if (Number.isFinite(w) && w > 0) weight = w;
+    }
+    let calories = null;
+    if (rawC !== '') {
+      const c = Number.parseInt(rawC, 10);
+      if (Number.isFinite(c) && Number.isInteger(c) && c >= 0 && c < MAX_CALORIES) calories = c;
+    }
+    if (weight == null && calories == null) { summary.invalid++; continue; }
+
+    if (!overwrite && date in entries) { summary.skipped++; continue; }
+
+    entries[date] = {
+      date,
+      weight,
+      unit: VALID_UNITS.includes(unitRaw) ? unitRaw : 'lbs',
+      note,
+      calories,
+    };
+    summary.imported++;
+  }
+
+  if (!dryRun && summary.imported > 0) writeJSON(KEYS.entries, entries);
+  return summary;
+}
+
+// ---------- backup timestamp ----------
+
+export async function markBackedUp(iso) {
+  const meta = readJSON(KEYS.meta, {});
+  const clean = meta && typeof meta === 'object' && !Array.isArray(meta) ? { ...meta } : {};
+  clean.lastBackup = typeof iso === 'string' && DATE_RE.test(iso) ? iso : null;
+  writeJSON(KEYS.meta, clean);
+  return clean.lastBackup;
+}
+
+export async function getLastBackup() {
+  const meta = readJSON(KEYS.meta, null);
+  return meta && typeof meta === 'object' && typeof meta.lastBackup === 'string' && DATE_RE.test(meta.lastBackup)
+    ? meta.lastBackup
+    : null;
 }

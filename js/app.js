@@ -56,6 +56,9 @@ const els = {
   historyEmpty: $('history-empty'),
   unitRadios: () => document.querySelectorAll('input[name="unit"]'),
   exportBtn: $('export-btn'),
+  importBtn: $('import-btn'),
+  importFile: $('import-file'),
+  backupStatus: $('backup-status'),
   toast: $('toast'),
 };
 
@@ -161,11 +164,12 @@ let refreshGen = 0;
 
 async function refresh() {
   const gen = ++refreshGen;
-  const [entries, goal, settings, periods] = await Promise.all([
+  const [entries, goal, settings, periods, lastBackup] = await Promise.all([
     store.getAllEntries(),
     store.getGoal(),
     store.getSettings(),
     store.getPeriods(),
+    store.getLastBackup(),
   ]);
   if (gen !== refreshGen) return; // a newer refresh superseded this one — let it paint
   const unit = settings.unit;
@@ -178,6 +182,25 @@ async function refresh() {
   renderPhaseCard(periods);
   renderHistory(entries, unit, periods);
   renderSettings(settings);
+  renderBackupStatus(entries, lastBackup);
+}
+
+function renderBackupStatus(entries, lastBackup) {
+  const el = els.backupStatus;
+  el.classList.remove('backup-due');
+  if (entries.length === 0) {
+    el.textContent = 'All data stays on this device. Once you have entries, export a CSV backup — Restore reloads one.';
+    return;
+  }
+  if (!lastBackup) {
+    el.textContent = 'All data stays on this device — no backup saved yet. Export a CSV; Restore reloads one if it’s ever lost.';
+    el.classList.add('backup-due');
+    return;
+  }
+  const days = stats.epochDay(todayISO()) - stats.epochDay(lastBackup);
+  const ago = days <= 0 ? 'today' : days === 1 ? 'yesterday' : `${days} days ago`;
+  el.textContent = `Last backup: ${ago}. Export a CSV now and then; Restore reloads one.`;
+  if (days >= 14) el.classList.add('backup-due');
 }
 
 function safeRefresh() {
@@ -835,7 +858,9 @@ els.exportBtn.addEventListener('click', async () => {
   if (canShareFile) {
     try {
       await navigator.share({ files: [file], title: 'Weight history' });
+      await store.markBackedUp(todayISO());
       toast('CSV shared');
+      safeRefresh();
       return;
     } catch (err) {
       if (err && err.name === 'AbortError') return; // user dismissed the share sheet
@@ -851,10 +876,64 @@ els.exportBtn.addEventListener('click', async () => {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+  await store.markBackedUp(todayISO());
   toast('CSV exported');
+  safeRefresh();
+});
+
+// ---------- restore from CSV ----------
+
+els.importBtn.addEventListener('click', () => els.importFile.click());
+
+els.importFile.addEventListener('change', async () => {
+  const file = els.importFile.files && els.importFile.files[0];
+  els.importFile.value = ''; // let the same file be picked again later
+  if (!file) return;
+
+  let text;
+  try {
+    text = await file.text();
+  } catch {
+    toast('Could not read that file.');
+    return;
+  }
+
+  let preview;
+  try {
+    preview = await store.importCSV(text, { dryRun: true });
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'Could not read that CSV.');
+    return;
+  }
+  if (preview.imported === 0) {
+    toast(preview.invalid ? `No valid entries found (${preview.invalid} rows skipped).` : 'No entries found in that file.');
+    return;
+  }
+
+  const n = preview.imported;
+  if (!window.confirm(`Import ${n} entr${n === 1 ? 'y' : 'ies'} from this file? Any entry on the same date will be replaced.`)) {
+    return;
+  }
+  const res = await withStore(() => store.importCSV(text, { overwrite: true }), 'Could not import that file.');
+  if (!res.ok) return;
+  state.loadedDate = null; // the shown day's values may have changed
+  const done = res.value.imported;
+  toast(`Restored ${done} entr${done === 1 ? 'y' : 'ies'}.`);
+  safeRefresh();
 });
 
 // ---------- environment hooks ----------
+
+// Ask the browser to keep our storage "persistent" so it isn't evicted under
+// storage pressure. Granted reliably on Chrome/Android; best-effort on iOS
+// (harmless if denied). The home-screen install already exempts us from iOS's
+// 7-day cap; this is belt-and-suspenders.
+if (navigator.storage && typeof navigator.storage.persist === 'function') {
+  navigator.storage.persisted()
+    .then((already) => (already ? null : navigator.storage.persist()))
+    .catch(() => {});
+}
 
 // Re-render (chart colors, etc.) when the OS theme flips.
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => safeRefresh());

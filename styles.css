@@ -507,6 +507,11 @@ input[type="date"] {
 
 .settings-row .field-label { margin: 0; }
 
+.settings-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+
+/* A gentle nudge when a backup is overdue */
+.hint.backup-due { color: var(--bad); font-weight: 500; }
+
 .segmented {
   display: inline-flex;
   border: 1px solid var(--baseline);
