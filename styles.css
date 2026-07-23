@@ -103,21 +103,36 @@ body {
 
 .card-row-actions { display: flex; gap: 4px; flex-shrink: 0; }
 
-/* Entry day-navigator: ‹ date › with a Today shortcut */
+/* Entry day-navigator: [‹]  date 📅  [›] — arrows pinned to the edges, the
+   date + calendar icon centered between them; "Jump to today" on its own line. */
 .entry-nav {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-bottom: 12px;
+  margin-bottom: 6px;
+}
+
+.entry-nav-center {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
 }
 
 .entry-nav .entry-date {
-  flex: 1;
   margin: 0;
   text-align: center;
   color: var(--ink-primary);
   font-size: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
+
+.entry-today-row { text-align: center; }
+#day-today { margin: 0 0 8px; }
 
 .nav-btn {
   flex-shrink: 0;
