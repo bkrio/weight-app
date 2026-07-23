@@ -2,9 +2,14 @@
 // (never storage), and reads its colors from the CSS custom properties so light
 // and dark mode stay in sync with the stylesheet.
 //
-// Chart contents, deliberately: the raw entries as a 2px line with point markers,
-// plus a dashed horizontal goal line when a goal is set. No moving average, no
-// interpolated points.
+// Chart contents, deliberately: raw weight points as a 2px blue line (left axis),
+// an optional orange calorie line (right axis) when any calories are logged, and
+// a dashed horizontal goal line when a goal is set. No moving average, no
+// interpolated points (missing values are gaps the line bridges).
+//
+// NOTE: this is a dual-axis chart by explicit request. The left (weight) and
+// right (calorie) scales are independent, so where the two lines cross carries
+// no meaning — read each line against its own axis.
 
 import { convert, round1, formatNumber } from './units.js';
 
@@ -15,6 +20,7 @@ function tokens() {
   const t = (name) => cs.getPropertyValue(name).trim();
   return {
     series: t('--series'),
+    series2: t('--series-2'),
     surface: t('--surface'),
     grid: t('--grid'),
     baseline: t('--baseline'),
@@ -94,103 +100,164 @@ const crosshairPlugin = {
 export function renderChart(canvas, entries, goal, unit) {
   const tk = tokens();
 
-  const data = entries
-    .filter((e) => e.weight != null && Number.isFinite(e.weight)) // calorie-only days aren't plotted
-    .map((e) => ({
-      x: localDateMs(e.date),
-      y: round1(convert(e.weight, e.unit, unit)),
-      date: e.date,
-      note: e.note,
-      calories: e.calories,
-    }));
+  // One sorted list of every date so both series align by index — that lets the
+  // tooltip show weight AND calories for the hovered day. Missing values are
+  // null: no point is drawn and the line bridges the gap (spanGaps).
+  const sorted = [...entries].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  const weightData = sorted.map((e) => ({
+    x: localDateMs(e.date),
+    y: e.weight != null && Number.isFinite(e.weight) ? round1(convert(e.weight, e.unit, unit)) : null,
+    date: e.date,
+    note: e.note,
+  }));
+  const calData = sorted.map((e) => ({
+    x: localDateMs(e.date),
+    y: e.calories != null ? e.calories : null,
+    date: e.date,
+    note: e.note,
+  }));
+
+  const weightVals = weightData.map((p) => p.y).filter((v) => v != null);
+  const calVals = calData.map((p) => p.y).filter((v) => v != null);
+  const hasCal = calVals.length > 0;
+
   const goalY = goal ? round1(convert(goal.targetWeight, goal.unit, unit)) : null;
 
-  const ys = data.map((p) => p.y).concat(goalY != null ? [goalY] : []);
-  const yMin = Math.min(...ys);
-  const yMax = Math.max(...ys);
-  const pad = Math.max(2, (yMax - yMin) * 0.15);
+  const wYs = weightVals.concat(goalY != null ? [goalY] : []);
+  const wMin = wYs.length ? Math.min(...wYs) : 0;
+  const wMax = wYs.length ? Math.max(...wYs) : 1;
+  const wPad = Math.max(2, (wMax - wMin) * 0.15);
 
-  const n = data.length;
+  const cMin = hasCal ? Math.min(...calVals) : 0;
+  const cMax = hasCal ? Math.max(...calVals) : 1;
+  const cPad = Math.max(50, (cMax - cMin) * 0.15);
+
+  const n = sorted.length;
   const pointRadius = n > 150 ? 2 : n > 60 ? 3 : 4;
+
+  const lineDataset = (extra) => ({
+    borderWidth: 2,
+    borderJoinStyle: 'round',
+    borderCapStyle: 'round',
+    tension: 0, // straight segments between real points — nothing implied
+    fill: false,
+    spanGaps: true, // bridge missing days; never invent a point
+    pointRadius,
+    pointHoverRadius: pointRadius + 2,
+    pointBorderColor: tk.surface, // 2px surface ring keeps dots legible on the line
+    pointBorderWidth: 2,
+    pointHoverBorderColor: tk.surface,
+    pointHoverBorderWidth: 2,
+    pointHitRadius: 24, // hit target much bigger than the mark
+    ...extra,
+  });
+
+  const datasets = [
+    lineDataset({
+      label: 'Weight',
+      data: weightData,
+      yAxisID: 'y',
+      borderColor: tk.series,
+      backgroundColor: tk.series,
+      pointBackgroundColor: tk.series,
+    }),
+  ];
+  if (hasCal) {
+    datasets.push(
+      lineDataset({
+        label: 'Calories',
+        data: calData,
+        yAxisID: 'yCal',
+        borderColor: tk.series2,
+        backgroundColor: tk.series2,
+        pointBackgroundColor: tk.series2,
+      })
+    );
+  }
+
+  const scales = {
+    x: {
+      type: 'time',
+      time: {
+        displayFormats: { day: 'MMM d', week: 'MMM d', month: 'MMM yyyy', quarter: 'MMM yyyy', year: 'yyyy' },
+      },
+      grid: { display: false },
+      border: { color: tk.baseline, width: 1 },
+      ticks: {
+        color: tk.muted,
+        font: { size: 11 },
+        maxRotation: 0,
+        autoSkip: true,
+        maxTicksLimit: 6,
+        padding: 6,
+      },
+    },
+    y: {
+      position: 'left',
+      suggestedMin: wMin - wPad,
+      suggestedMax: wMax + wPad,
+      border: { display: false },
+      grid: { color: tk.grid, lineWidth: 1, drawTicks: false },
+      ticks: {
+        color: tk.muted,
+        font: { size: 11 },
+        padding: 8,
+        maxTicksLimit: 6,
+        callback: (v) => formatNumber(v),
+      },
+    },
+  };
+  if (hasCal) {
+    scales.yCal = {
+      position: 'right',
+      suggestedMin: Math.max(0, cMin - cPad),
+      suggestedMax: cMax + cPad,
+      border: { display: false },
+      grid: { display: false }, // the left (weight) axis owns the horizontal grid
+      ticks: {
+        color: tk.series2, // tinted orange to tie it to the calorie line
+        font: { size: 11 },
+        padding: 8,
+        maxTicksLimit: 6,
+        callback: (v) => Math.round(v).toLocaleString(),
+      },
+    };
+  }
 
   if (chart) chart.destroy();
   chart = new window.Chart(canvas, {
     type: 'line',
-    data: {
-      datasets: [
-        {
-          data,
-          borderColor: tk.series,
-          backgroundColor: tk.series,
-          borderWidth: 2,
-          borderJoinStyle: 'round',
-          borderCapStyle: 'round',
-          tension: 0, // straight segments between real points — nothing implied
-          fill: false,
-          pointRadius,
-          pointHoverRadius: pointRadius + 2,
-          pointBackgroundColor: tk.series,
-          pointBorderColor: tk.surface, // 2px surface ring keeps dots legible on the line
-          pointBorderWidth: 2,
-          pointHoverBorderColor: tk.surface,
-          pointHoverBorderWidth: 2,
-          pointHitRadius: 24, // hit target much bigger than the mark
-        },
-      ],
-    },
+    data: { datasets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      animation: window.matchMedia('(prefers-reduced-motion: reduce)').matches
-        ? false
-        : { duration: 250 },
-      interaction: { mode: 'nearest', axis: 'x', intersect: false },
+      animation: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? false : { duration: 250 },
+      interaction: { mode: 'index', axis: 'x', intersect: false },
       layout: { padding: { top: 14 } },
-      scales: {
-        x: {
-          type: 'time',
-          time: {
-            displayFormats: {
-              day: 'MMM d',
-              week: 'MMM d',
-              month: 'MMM yyyy',
-              quarter: 'MMM yyyy',
-              year: 'yyyy',
-            },
-          },
-          grid: { display: false },
-          border: { color: tk.baseline, width: 1 },
-          ticks: {
-            color: tk.muted,
-            font: { size: 11 },
-            maxRotation: 0,
-            autoSkip: true,
-            maxTicksLimit: 6,
-            padding: 6,
-          },
-        },
-        y: {
-          suggestedMin: yMin - pad,
-          suggestedMax: yMax + pad,
-          border: { display: false },
-          grid: { color: tk.grid, lineWidth: 1, drawTicks: false },
-          ticks: {
-            color: tk.muted,
-            font: { size: 11 },
-            padding: 8,
-            maxTicksLimit: 6,
-            callback: (v) => formatNumber(v),
-          },
-        },
-      },
+      scales,
       plugins: {
-        legend: { display: false }, // single series — the card title names it
+        legend: hasCal
+          ? {
+              display: true,
+              position: 'top',
+              align: 'end',
+              labels: {
+                color: tk.secondary,
+                usePointStyle: true,
+                pointStyle: 'line',
+                boxWidth: 22,
+                boxHeight: 2,
+                font: { size: 12 },
+                padding: 14,
+              },
+            }
+          : { display: false }, // single series — the card title names it
         goalLine: goalY != null
           ? { value: goalY, label: `Goal ${formatNumber(goalY)}`, color: tk.muted, labelColor: tk.secondary }
           : { value: null },
         crosshair: { color: tk.border },
         tooltip: {
-          displayColors: false,
+          displayColors: hasCal, // a color key helps once there are two series
           backgroundColor: tk.raised,
           borderColor: tk.border,
           borderWidth: 1,
@@ -203,15 +270,16 @@ export function renderChart(canvas, entries, goal, unit) {
           padding: 10,
           cornerRadius: 8,
           caretSize: 5,
+          filter: (item) => item.parsed.y != null, // hide the series with no value that day
           callbacks: {
-            title: (items) => formatTooltipDate(items[0].raw.date),
-            label: (item) => `${formatNumber(item.raw.y)} ${unit}`,
+            title: (items) => (items.length ? formatTooltipDate(items[0].raw.date) : ''),
+            label: (item) =>
+              item.dataset.yAxisID === 'yCal'
+                ? `${Math.round(item.parsed.y).toLocaleString()} cal`
+                : `${formatNumber(item.parsed.y)} ${unit}`,
             footer: (items) => {
-              const r = items[0].raw;
-              const parts = [];
-              if (r.calories != null) parts.push(`${r.calories.toLocaleString()} cal`);
-              if (r.note) parts.push(r.note);
-              return parts.join(' · ');
+              const withNote = items.find((it) => it.raw && it.raw.note);
+              return withNote ? withNote.raw.note : '';
             },
           },
         },

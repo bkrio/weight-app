@@ -40,6 +40,11 @@
           <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
         </button>
         <h2 id="entry-title" class="card-title entry-date">Today</h2>
+        <button id="day-pick" type="button" class="nav-btn" aria-label="Pick a date">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16" rx="2"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/></svg>
+        </button>
+        <label class="visually-hidden" for="entry-date-input">Pick a date</label>
+        <input id="entry-date-input" type="date" min="1900-01-01" class="date-picker-hidden">
         <button id="day-next" type="button" class="nav-btn" aria-label="Next day">
           <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
         </button>
@@ -54,20 +59,17 @@
           <button type="submit" id="log-btn" class="primary-btn">Log</button>
         </div>
         <div class="field-row">
-          <label class="field-inline-label" for="note-input">Note</label>
-          <input id="note-input" type="text" class="text-field" maxlength="200" autocomplete="off"
-                 placeholder="e.g. traveled, high sodium">
-        </div>
-        <div class="field-row">
           <label class="field-inline-label" for="calories-input">Calories</label>
           <input id="calories-input" type="text" inputmode="numeric" class="text-field" maxlength="6" autocomplete="off"
                  placeholder="add tonight or tomorrow">
         </div>
+        <div class="field-row">
+          <label class="field-inline-label" for="note-input">Note</label>
+          <input id="note-input" type="text" class="text-field" maxlength="200" autocomplete="off"
+                 placeholder="e.g. traveled, high sodium">
+        </div>
         <div class="entry-extra">
           <p id="entry-hint" class="hint" aria-live="polite"></p>
-          <button id="other-day-toggle" type="button" class="text-btn subtle">Jump to a date</button>
-          <label class="visually-hidden" for="entry-date-input">Date to log</label>
-          <input id="entry-date-input" type="date" min="1900-01-01" hidden>
         </div>
       </form>
     </section>

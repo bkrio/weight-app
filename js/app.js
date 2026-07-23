@@ -19,7 +19,7 @@ const els = {
   dayPrev: $('day-prev'),
   dayNext: $('day-next'),
   dayToday: $('day-today'),
-  otherDayToggle: $('other-day-toggle'),
+  dayPick: $('day-pick'),
   entryDateInput: $('entry-date-input'),
   trendLine: $('trend-line'),
   projectionLine: $('projection-line'),
@@ -421,11 +421,12 @@ function renderStats(entries, goal, unit, periods) {
 
 function renderChartCard(entries, goal, unit) {
   els.chartTitle.textContent = `Weight (${unit})`;
-  const weightEntries = entries.filter((e) => e.weight != null && Number.isFinite(e.weight));
-  const hasData = weightEntries.length > 0;
+  // Plot anything with a weight or calories; the chart overlays both lines.
+  const plottable = entries.filter((e) => (e.weight != null && Number.isFinite(e.weight)) || e.calories != null);
+  const hasData = plottable.length > 0;
   els.chartWrap.hidden = !hasData;
   els.chartEmpty.hidden = hasData;
-  if (hasData) renderChart(els.chartCanvas, weightEntries, goal, unit);
+  if (hasData) renderChart(els.chartCanvas, plottable, goal, unit);
 }
 
 function renderGoalCard(goal, unit) {
@@ -588,14 +589,13 @@ function renderSettings(settings) {
 
 function goToDay(date) {
   state.formDate = date;
-  els.entryDateInput.hidden = true;
+  els.entryDateInput.classList.remove('revealed'); // in case the fallback picker was shown
   safeRefresh();
 }
 
 function startEdit(entry) {
   state.formDate = entry.date;
   state.loadedDate = null; // force loadDay on the next render
-  els.entryDateInput.hidden = true;
   safeRefresh().then(() => {
     els.entryForm.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' });
     els.weightInput.focus();
@@ -609,11 +609,17 @@ els.dayNext.addEventListener('click', () => {
 });
 els.dayToday.addEventListener('click', () => goToDay(todayISO()));
 
-els.otherDayToggle.addEventListener('click', () => {
-  els.entryDateInput.hidden = false;
+// Calendar icon opens the native date picker (the old "Jump to a date").
+els.dayPick.addEventListener('click', () => {
   els.entryDateInput.max = todayISO();
   els.entryDateInput.value = state.formDate || todayISO();
-  els.entryDateInput.focus();
+  try {
+    els.entryDateInput.showPicker();
+  } catch {
+    // Older browsers without showPicker(): reveal the field inline and focus it.
+    els.entryDateInput.classList.add('revealed');
+    els.entryDateInput.focus();
+  }
 });
 
 els.entryDateInput.addEventListener('change', () => {

@@ -12,7 +12,8 @@
   --grid: #e1e0d9;
   --baseline: #c3c2b7;
   --border: rgba(11, 11, 11, 0.10);
-  --series: #2a78d6;          /* chart line + focus rings (graphics: 3:1 rule) */
+  --series: #2a78d6;          /* weight line + focus rings (graphics: 3:1 rule) */
+  --series-2: #eb6834;        /* calorie line (orange) */
   --accent-fill: #1f66c2;     /* button fills under white text — 5.6:1 with #fff */
   --accent-ink: #1f66c2;      /* accent-colored TEXT — 5.5:1 on --surface */
   --good: #006300;
@@ -32,6 +33,7 @@
     --baseline: #383835;
     --border: rgba(255, 255, 255, 0.12);
     --series: #3987e5;
+    --series-2: #eb6834;      /* calorie line (orange) — reads on the dark surface */
     --accent-fill: #1f66c2;   /* same fill both modes — white text stays 5.6:1 */
     --accent-ink: #3987e5;    /* 4.8:1 on the dark surface */
     --good: #0ca30c;
@@ -135,6 +137,33 @@ body {
 .nav-btn:disabled { color: var(--ink-muted); opacity: 0.4; cursor: default; }
 
 #day-today { flex-shrink: 0; }
+
+#day-pick { flex-shrink: 0; }
+
+/* The date field lives in the nav but is invisible — the calendar icon opens it
+   via showPicker(). Not display:none, so showPicker() still works. */
+.date-picker-hidden {
+  width: 0;
+  height: 0;
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  opacity: 0;
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+
+/* Fallback for browsers without showPicker(): show it as a normal field. */
+.date-picker-hidden.revealed {
+  width: auto;
+  height: auto;
+  opacity: 1;
+  overflow: visible;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
 
 /* Goal card header: title + prominent target, actions on the right */
 .goal-head { align-items: baseline; }
