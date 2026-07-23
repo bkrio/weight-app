@@ -113,6 +113,7 @@ body {
 }
 
 .entry-nav-center {
+  position: relative; /* anchors the absolutely-positioned hidden date input */
   flex: 1;
   min-width: 0;
   display: flex;
@@ -156,21 +157,26 @@ body {
 #day-pick { flex-shrink: 0; }
 
 /* The date field lives in the nav but is invisible — the calendar icon opens it
-   via showPicker(). Not display:none, so showPicker() still works. */
+   via showPicker(). It's positioned ABSOLUTE so it takes no layout space (mobile
+   Safari ignores width:0 on date inputs and would otherwise reserve ~150px). Not
+   display:none, so showPicker() still works. */
 .date-picker-hidden {
-  width: 0;
-  height: 0;
-  min-width: 0;
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 1px;
+  height: 1px;
   padding: 0;
   margin: 0;
   border: 0;
   opacity: 0;
   overflow: hidden;
-  flex: 0 0 auto;
+  pointer-events: none;
 }
 
-/* Fallback for browsers without showPicker(): show it as a normal field. */
+/* Fallback for browsers without showPicker(): show it as a normal inline field. */
 .date-picker-hidden.revealed {
+  position: static;
   width: auto;
   height: auto;
   opacity: 1;
@@ -178,6 +184,7 @@ body {
   padding: 9px 12px;
   border: 1px solid var(--border);
   border-radius: 10px;
+  pointer-events: auto;
 }
 
 /* Goal card header: title + prominent target, actions on the right */
