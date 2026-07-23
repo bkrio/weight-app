@@ -95,6 +95,29 @@ const crosshairPlugin = {
   },
 };
 
+// Small titles sitting in the top padding band, each above its own y-axis
+// numbers: "Weight" over the left axis, "Calories" over the right — colored to
+// match their lines so each axis is unmistakable.
+const axisTitlesPlugin = {
+  id: 'axisTitles',
+  afterDraw(c, _args, opts) {
+    if (!opts || !opts.left || !opts.right) return;
+    const { ctx, chartArea } = c;
+    if (!chartArea) return;
+    const y = Math.max(10, chartArea.top - 12);
+    ctx.save();
+    ctx.font = '600 11px system-ui, -apple-system, "Segoe UI", sans-serif';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = opts.left.color;
+    ctx.textAlign = 'left';
+    ctx.fillText(opts.left.text, 2, y);
+    ctx.fillStyle = opts.right.color;
+    ctx.textAlign = 'right';
+    ctx.fillText(opts.right.text, c.width - 2, y);
+    ctx.restore();
+  },
+};
+
 // (Re)draws the chart from scratch — data volume is tiny, and rebuilding avoids
 // stale-option bugs on unit/theme/goal changes.
 export function renderChart(canvas, entries, goal, unit) {
@@ -233,25 +256,13 @@ export function renderChart(canvas, entries, goal, unit) {
       maintainAspectRatio: false,
       animation: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? false : { duration: 250 },
       interaction: { mode: 'index', axis: 'x', intersect: false },
-      layout: { padding: { top: 14 } },
+      layout: { padding: { top: hasCal ? 26 : 14 } }, // room for the axis titles
       scales,
       plugins: {
-        legend: hasCal
-          ? {
-              display: true,
-              position: 'top',
-              align: 'end',
-              labels: {
-                color: tk.secondary,
-                usePointStyle: true,
-                pointStyle: 'line',
-                boxWidth: 22,
-                boxHeight: 2,
-                font: { size: 12 },
-                padding: 14,
-              },
-            }
-          : { display: false }, // single series — the card title names it
+        legend: { display: false }, // replaced by per-axis titles (axisTitles plugin)
+        axisTitles: hasCal
+          ? { left: { text: 'Weight', color: tk.series }, right: { text: 'Calories', color: tk.series2 } }
+          : { left: null, right: null },
         goalLine: goalY != null
           ? { value: goalY, label: `Goal ${formatNumber(goalY)}`, color: tk.muted, labelColor: tk.secondary }
           : { value: null },
@@ -285,7 +296,7 @@ export function renderChart(canvas, entries, goal, unit) {
         },
       },
     },
-    plugins: [goalLinePlugin, crosshairPlugin],
+    plugins: [goalLinePlugin, crosshairPlugin, axisTitlesPlugin],
   });
   return chart;
 }
