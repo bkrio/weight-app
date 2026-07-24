@@ -21,6 +21,8 @@ function tokens() {
   return {
     series: t('--series'),
     series2: t('--series-2'),
+    accentInk: t('--accent-ink'),
+    series2Ink: t('--series-2-ink'),
     surface: t('--surface'),
     grid: t('--grid'),
     baseline: t('--baseline'),
@@ -232,7 +234,7 @@ export function renderChart(canvas, entries, goal, unit, range = null) {
       border: { display: false },
       grid: { color: tk.grid, lineWidth: 1, drawTicks: false },
       ticks: {
-        color: tk.muted,
+        color: tk.accentInk, // blue, matching the "Weight" axis title (accessible ink)
         font: { size: 11 },
         padding: 8,
         maxTicksLimit: 6,
@@ -248,7 +250,7 @@ export function renderChart(canvas, entries, goal, unit, range = null) {
       border: { display: false },
       grid: { display: false }, // the left (weight) axis owns the horizontal grid
       ticks: {
-        color: tk.series2, // tinted orange to tie it to the calorie line
+        color: tk.series2Ink, // orange text (accessible ink) tying it to the calorie line
         font: { size: 11 },
         padding: 8,
         maxTicksLimit: 6,
@@ -271,7 +273,7 @@ export function renderChart(canvas, entries, goal, unit, range = null) {
       plugins: {
         legend: { display: false }, // replaced by per-axis titles (axisTitles plugin)
         axisTitles: hasCal
-          ? { left: { text: 'Weight', color: tk.series }, right: { text: 'Calories', color: tk.series2 } }
+          ? { left: { text: 'Weight', color: tk.accentInk }, right: { text: 'Calories', color: tk.series2Ink } }
           : { left: null, right: null },
         goalLine: goalY != null
           ? { value: goalY, label: `Goal ${formatNumber(goalY)}`, color: tk.muted, labelColor: tk.secondary }

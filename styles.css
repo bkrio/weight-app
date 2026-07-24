@@ -14,8 +14,9 @@
   --border: rgba(11, 11, 11, 0.10);
   --series: #2a78d6;          /* weight line + focus rings (graphics: 3:1 rule) */
   --series-2: #eb6834;        /* calorie line (orange) */
+  --series-2-ink: #b8461c;    /* calorie TEXT (axis title/ticks) — 5.2:1 on --surface */
   --accent-fill: #1f66c2;     /* button fills under white text — 5.6:1 with #fff */
-  --accent-ink: #1f66c2;      /* accent-colored TEXT — 5.5:1 on --surface */
+  --accent-ink: #1f66c2;      /* accent-colored TEXT (weight axis title/ticks) — 5.5:1 */
   --good: #006300;
   --bad: #d03b3b;
 }
@@ -34,6 +35,7 @@
     --border: rgba(255, 255, 255, 0.12);
     --series: #3987e5;
     --series-2: #eb6834;      /* calorie line (orange) — reads on the dark surface */
+    --series-2-ink: #eb6834;  /* calorie TEXT — 5.4:1 on the dark surface */
     --accent-fill: #1f66c2;   /* same fill both modes — white text stays 5.6:1 */
     --accent-ink: #3987e5;    /* 4.8:1 on the dark surface */
     --good: #0ca30c;
