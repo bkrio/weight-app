@@ -543,5 +543,71 @@ await test('chartRangeBounds: unknown/deleted phase -> null (falls back to all)'
   assert.equal(stats.chartRangeBounds([{ date: '2026-07-01', weight: 180, unit: 'lbs' }], 'phase:gone', []), null);
 });
 
+// ---------------- maintenance estimate ----------------
+// Helper: N consecutive days from startDate with a linear weight slope + fixed calories.
+function maintSeq(startDate, count, startWeight, slopePerDay, unit, calories) {
+  const s = stats.epochDay(startDate);
+  return Array.from({ length: count }, (_, i) => ({
+    date: stats.dayToISO(s + i),
+    weight: Math.round((startWeight + slopePerDay * i) * 100) / 100,
+    unit,
+    calories,
+    note: '',
+  }));
+}
+await test('estimateMaintenance: intake - slope*3500 (losing 0.7 lb/wk on 2000 -> ~2350)', () => {
+  // -0.1 lb/day = -0.7 lb/wk; 21 days; 2000 kcal/day
+  const entries = maintSeq('2026-06-01', 21, 200, -0.1, 'lbs', 2000);
+  const m = stats.estimateMaintenance(entries, 'lbs', []);
+  assert.equal(m.status, 'ok');
+  assert.ok(Math.abs(m.maintenance - 2350) <= 10, 'maintenance=' + m.maintenance);
+  assert.ok(m.low < m.maintenance && m.high > m.maintenance);
+  assert.equal(m.avgIntake, 2000);
+});
+await test('estimateMaintenance: maintenance is unit-invariant (lbs vs kg give same kcal)', () => {
+  const lbsE = maintSeq('2026-06-01', 21, 200, -0.1, 'lbs', 2000);
+  const kgE = lbsE.map((e) => ({ ...e, weight: Math.round(units.convert(e.weight, 'lbs', 'kg') * 100) / 100, unit: 'kg' }));
+  const mL = stats.estimateMaintenance(lbsE, 'lbs', []);
+  const mK = stats.estimateMaintenance(kgE, 'kg', []);
+  assert.ok(Math.abs(mL.maintenance - mK.maintenance) <= 20, mL.maintenance + ' vs ' + mK.maintenance);
+});
+await test('estimateMaintenance: gains -> maintenance below intake (bulk)', () => {
+  const entries = maintSeq('2026-06-01', 21, 180, +0.1, 'lbs', 3000); // gaining 0.7 lb/wk
+  const m = stats.estimateMaintenance(entries, 'lbs', []);
+  assert.equal(m.status, 'ok');
+  assert.ok(m.maintenance < 3000, 'maintenance=' + m.maintenance);
+  assert.ok(Math.abs(m.maintenance - 2650) <= 10); // 3000 - 0.1*3500
+});
+await test('estimateMaintenance: insufficient data', () => {
+  assert.equal(stats.estimateMaintenance([], 'lbs', []).status, 'no-data');
+  const few = maintSeq('2026-06-01', 8, 200, -0.1, 'lbs', 2000); // <10 weigh-ins
+  const m = stats.estimateMaintenance(few, 'lbs', []);
+  assert.equal(m.status, 'insufficient');
+  assert.equal(m.weighIns, 8);
+});
+await test('estimateMaintenance: window clips to the current phase', () => {
+  const entries = maintSeq('2026-06-01', 21, 200, -0.1, 'lbs', 2000); // latest = 2026-06-21
+  // a phase that started only 7 days before the latest entry -> window shrinks below the gate
+  const periods = [{ id: 'p', name: 'New cut', startDate: '2026-06-15' }];
+  const m = stats.estimateMaintenance(entries, 'lbs', periods);
+  assert.equal(m.status, 'insufficient'); // only ~7 days in the clipped window
+  assert.equal(m.clippedPhase, 'New cut');
+});
+await test('maintenanceByPhase: per-phase maintenance across history', () => {
+  const bulk = maintSeq('2026-05-01', 20, 180, +0.1, 'lbs', 3000); // days 05-01..05-20
+  const cut = maintSeq('2026-05-21', 20, 182, -0.1, 'lbs', 2000);  // days 05-21..06-09
+  const entries = [...bulk, ...cut];
+  const periods = [
+    { id: 'b', name: 'Bulk', startDate: '2026-05-01' },
+    { id: 'c', name: 'Cut', startDate: '2026-05-21' },
+  ];
+  const byPhase = stats.maintenanceByPhase(entries, 'lbs', periods);
+  assert.equal(byPhase.length, 2);
+  const bulkM = byPhase.find((p) => p.name === 'Bulk').maintenance;
+  const cutM = byPhase.find((p) => p.name === 'Cut').maintenance;
+  assert.ok(Math.abs(bulkM - 2650) <= 20, 'bulk=' + bulkM);
+  assert.ok(Math.abs(cutM - 2350) <= 20, 'cut=' + cutM);
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

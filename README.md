@@ -54,7 +54,12 @@ isn't changed until you press Log again.
 
 Derived stats shown as text: current trend (lbs or kg per week, linear
 regression), a projected goal date, and rolling changes — **1-day** (yesterday →
-today), 7-day, 30-day, since phase/start, and distance to goal.
+today), 7-day, 30-day, since phase/start, and distance to goal. Once you've logged
+weight and calories together for ~2 weeks, it also shows an **estimated
+maintenance** (adaptive TDEE) — `maintenance ≈ avg intake − weight-change × 3,500
+kcal/lb`, computed over a trailing 28-day window (clipped to the current phase so
+a bulk isn't blended with a cut), shown as a range because it's an estimate. A
+per-phase maintenance breakdown appears once two or more phases have enough data.
 
 Data notes:
 

@@ -23,6 +23,8 @@ const els = {
   entryDateInput: $('entry-date-input'),
   trendLine: $('trend-line'),
   projectionLine: $('projection-line'),
+  maintenanceLine: $('maintenance-line'),
+  maintenancePhases: $('maintenance-phases'),
   tiles: {
     d1: $('tile-1d'),
     d7: $('tile-7d'),
@@ -365,6 +367,33 @@ function renderStats(entries, goal, unit, periods) {
       els.projectionLine.className = 'stat-sentence';
       break;
     }
+  }
+
+  // Maintenance estimate (adaptive TDEE from recent weight + calorie logs)
+  const maint = stats.estimateMaintenance(entries, unit, periods);
+  if (maint.status === 'ok') {
+    const src = maint.clippedPhase ? 'your current phase' : `your last ${stats.MAINT_WINDOW_DAYS} days`;
+    els.maintenanceLine.textContent =
+      `Estimated maintenance: ~${formatCalories(maint.maintenance)} cal/day (${formatCalories(maint.low)}–${formatCalories(maint.high)}) — from ~${formatCalories(maint.avgIntake)} avg intake over ${src}.`;
+    els.maintenanceLine.className = 'stat-sentence';
+  } else if (maint.status === 'insufficient') {
+    els.maintenanceLine.textContent =
+      `Estimated maintenance needs more data — log weight and calories together for ~2 weeks (have ${maint.weighIns} weigh-ins, ${maint.calDays} calorie days).`;
+    els.maintenanceLine.className = 'stat-sentence muted';
+  } else {
+    els.maintenanceLine.textContent = '';
+    els.maintenanceLine.className = 'stat-sentence muted';
+  }
+
+  // Historical maintenance by phase — shown only with 2+ phases that have data.
+  const byPhase = stats.maintenanceByPhase(entries, unit, periods);
+  if (byPhase.length >= 2) {
+    els.maintenancePhases.hidden = false;
+    els.maintenancePhases.textContent =
+      'Maintenance by phase — ' + byPhase.map((p) => `${p.name}: ~${formatCalories(p.maintenance)}`).join(' · ');
+  } else {
+    els.maintenancePhases.hidden = true;
+    els.maintenancePhases.textContent = '';
   }
 
   // Tiles

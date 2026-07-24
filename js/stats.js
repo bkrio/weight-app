@@ -225,6 +225,112 @@ export function chartRangeBounds(entries, range, periods = []) {
   return { start: dayToISO(epochDay(latest) - (days - 1)), end: latest };
 }
 
+// ---------- maintenance estimate (adaptive TDEE from the user's own data) ----------
+// Energy balance: maintenance = avg intake - (weight-change/day x energy density).
+// The weight slope is fit by least-squares over the window (all weigh-ins, not
+// endpoints). Deliberately uses a RECENT window, not all history, because
+// maintenance drifts with body mass + metabolic adaptation.
+
+export const MAINT_WINDOW_DAYS = 28;   // trailing window for the "current" estimate
+export const MAINT_MIN_WEIGH_INS = 10; // gate: weigh-ins within the window
+export const MAINT_MIN_CAL_DAYS = 10;  // gate: calorie-logged days within the window
+export const MAINT_MIN_SPAN_DAYS = 14; // gate: first->last weigh-in must span this
+const KCAL_PER_LB = 3500;
+const KCAL_PER_KG = 7700;
+const MAINT_BAND_FLOOR = 75; // never imply more precision than the model has
+
+// Maintenance over an explicit inclusive [startDate, endDate] window.
+// Returns { status:'insufficient'|'ok', ... }.
+export function maintenanceOverWindow(entries, unit, startDate, endDate) {
+  const startDay = epochDay(startDate);
+  const endDay = epochDay(endDate);
+  const inWin = (d) => { const x = epochDay(d); return x >= startDay && x <= endDay; };
+
+  const w = entries
+    .filter((e) => e.weight != null && Number.isFinite(e.weight) && inWin(e.date))
+    .map((e) => ({ day: epochDay(e.date), val: convert(e.weight, e.unit, unit) }))
+    .sort((a, b) => a.day - b.day);
+  const cals = entries
+    .filter((e) => e.calories != null && Number.isFinite(e.calories) && inWin(e.date))
+    .map((e) => e.calories);
+
+  const span = w.length ? w[w.length - 1].day - w[0].day : 0;
+  const insufficient = () => ({
+    status: 'insufficient', weighIns: w.length, calDays: cals.length, spanDays: span,
+    needWeighIns: MAINT_MIN_WEIGH_INS, needCalDays: MAINT_MIN_CAL_DAYS, needSpanDays: MAINT_MIN_SPAN_DAYS,
+  });
+  if (w.length < MAINT_MIN_WEIGH_INS || cals.length < MAINT_MIN_CAL_DAYS || span < MAINT_MIN_SPAN_DAYS) {
+    return insufficient();
+  }
+
+  const n = w.length;
+  const meanX = w.reduce((s, p) => s + p.day, 0) / n;
+  const meanY = w.reduce((s, p) => s + p.val, 0) / n;
+  let sxx = 0, sxy = 0;
+  for (const p of w) { sxx += (p.day - meanX) * (p.day - meanX); sxy += (p.day - meanX) * (p.val - meanY); }
+  if (sxx === 0) return insufficient();
+  const slopePerDay = sxy / sxx; // weight units / day
+  const intercept = meanY - slopePerDay * meanX;
+
+  // Standard error of the slope -> a data-driven uncertainty band.
+  let sse = 0;
+  for (const p of w) { const fit = slopePerDay * p.day + intercept; sse += (p.val - fit) * (p.val - fit); }
+  const seSlope = n > 2 ? Math.sqrt((sse / (n - 2)) / sxx) : 0;
+
+  const avgIntake = cals.reduce((s, c) => s + c, 0) / cals.length;
+  const kcalPerUnit = unit === 'kg' ? KCAL_PER_KG : KCAL_PER_LB;
+  const maintenance = avgIntake - slopePerDay * kcalPerUnit;
+  const half = Math.max(MAINT_BAND_FLOOR, seSlope * kcalPerUnit);
+  const r10 = (x) => Math.round(x / 10) * 10;
+  return {
+    status: 'ok',
+    maintenance: r10(maintenance),
+    low: r10(maintenance - half),
+    high: r10(maintenance + half),
+    avgIntake: Math.round(avgIntake),
+    slopePerWeek: slopePerDay * 7,
+    weighIns: n, calDays: cals.length, spanDays: span,
+    startDate, endDate,
+  };
+}
+
+// Current maintenance: a trailing MAINT_WINDOW_DAYS window ending at the latest
+// entry, clipped so it never reaches back across the current phase's start.
+export function estimateMaintenance(entries, unit, periods = []) {
+  const dates = entries.map((e) => e.date).filter((d) => typeof d === 'string').sort();
+  if (!dates.length) return { status: 'no-data' };
+  const end = dates[dates.length - 1];
+  let startDay = epochDay(end) - (MAINT_WINDOW_DAYS - 1);
+  let clippedPhase = null;
+  if (periods.length) {
+    const cur = [...periods].sort((a, b) => (a.startDate < b.startDate ? -1 : 1)).pop();
+    const curStartDay = epochDay(cur.startDate);
+    if (curStartDay > startDay) { startDay = curStartDay; clippedPhase = cur.name; }
+  }
+  const res = maintenanceOverWindow(entries, unit, dayToISO(startDay), end);
+  res.clippedPhase = clippedPhase; // phase name if the window was shortened to it, else null
+  return res;
+}
+
+// Historical view: maintenance within each phase's own span (uses all history,
+// segmented at phase boundaries so a bulk isn't blended with a cut). Only phases
+// with enough data are returned.
+export function maintenanceByPhase(entries, unit, periods = []) {
+  const sorted = [...periods].sort((a, b) => (a.startDate < b.startDate ? -1 : 1));
+  const dates = entries.map((e) => e.date).filter((d) => typeof d === 'string').sort();
+  const latest = dates.length ? dates[dates.length - 1] : null;
+  const out = [];
+  sorted.forEach((p, i) => {
+    const start = p.startDate;
+    const end = i + 1 < sorted.length
+      ? dayToISO(epochDay(sorted[i + 1].startDate) - 1)
+      : (latest && latest >= start ? latest : start);
+    const res = maintenanceOverWindow(entries, unit, start, end);
+    if (res.status === 'ok') out.push({ name: p.name, startDate: start, endDate: end, maintenance: res.maintenance });
+  });
+  return out;
+}
+
 // Signed distance to goal: diff = current - target (positive = above target).
 export function distanceToGoal(entries, goal, unit) {
   if (!goal) return null;
