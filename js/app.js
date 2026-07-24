@@ -23,7 +23,6 @@ const els = {
   entryDateInput: $('entry-date-input'),
   trendLine: $('trend-line'),
   projectionLine: $('projection-line'),
-  maintenanceLine: $('maintenance-line'),
   maintenancePhases: $('maintenance-phases'),
   tiles: {
     d1: $('tile-1d'),
@@ -31,6 +30,7 @@ const els = {
     d30: $('tile-30d'),
     start: $('tile-start'),
     goal: $('tile-goal'),
+    maint: $('tile-maint'),
   },
   chartTitle: $('chart-title'),
   chartCanvas: $('chart-canvas'),
@@ -369,20 +369,19 @@ function renderStats(entries, goal, unit, periods) {
     }
   }
 
-  // Maintenance estimate (adaptive TDEE from recent weight + calorie logs)
+  // Maintenance estimate tile (adaptive TDEE from recent weight + calorie logs)
   const maint = stats.estimateMaintenance(entries, unit, periods);
+  const mVal = els.tiles.maint.querySelector('.tile-value');
+  const mSub = els.tiles.maint.querySelector('.tile-sub');
   if (maint.status === 'ok') {
-    const src = maint.clippedPhase ? 'your current phase' : `your last ${stats.MAINT_WINDOW_DAYS} days`;
-    els.maintenanceLine.textContent =
-      `Estimated maintenance: ~${formatCalories(maint.maintenance)} cal/day (${formatCalories(maint.low)}–${formatCalories(maint.high)}) — from ~${formatCalories(maint.avgIntake)} avg intake over ${src}.`;
-    els.maintenanceLine.className = 'stat-sentence';
+    mVal.textContent = `~${formatCalories(maint.maintenance)} cal`;
+    mSub.textContent = `${formatCalories(maint.low)}–${formatCalories(maint.high)}${maint.clippedPhase ? ' · this phase' : ''}`;
   } else if (maint.status === 'insufficient') {
-    els.maintenanceLine.textContent =
-      `Estimated maintenance needs more data — log weight and calories together for ~2 weeks (have ${maint.weighIns} weigh-ins, ${maint.calDays} calorie days).`;
-    els.maintenanceLine.className = 'stat-sentence muted';
+    mVal.textContent = '—';
+    mSub.textContent = 'need ~2 wks of logs';
   } else {
-    els.maintenanceLine.textContent = '';
-    els.maintenanceLine.className = 'stat-sentence muted';
+    mVal.textContent = '—';
+    mSub.textContent = 'log weight + calories';
   }
 
   // Historical maintenance by phase — shown only with 2+ phases that have data.

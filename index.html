@@ -81,8 +81,6 @@
     <section class="card" aria-label="Stats">
       <p id="trend-line" class="stat-sentence muted">Loading…</p>
       <p id="projection-line" class="stat-sentence muted"></p>
-      <p id="maintenance-line" class="stat-sentence muted"></p>
-      <p id="maintenance-phases" class="stat-sentence muted" hidden></p>
       <div class="tiles">
         <div class="tile" id="tile-1d">
           <span class="tile-label">1-day change</span>
@@ -109,7 +107,13 @@
           <span class="tile-value">—</span>
           <span class="tile-sub"></span>
         </div>
+        <div class="tile" id="tile-maint">
+          <span class="tile-label">Maintenance</span>
+          <span class="tile-value">—</span>
+          <span class="tile-sub"></span>
+        </div>
       </div>
+      <p id="maintenance-phases" class="stat-sentence muted" hidden></p>
     </section>
 
     <section class="card" aria-labelledby="chart-title">
